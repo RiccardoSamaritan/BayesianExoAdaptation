@@ -1,6 +1,12 @@
 # BayesianExoAdaptation
 
-This project addresses the challenge of Source-Free Domain Adaptation (SFDA) in assistive robotics, specifically for power-assist exoskeletons. The goal is to adapt a myoelectric (EMG) controller, pre-trained on a pool of healthy subjects (Source Domain), to a new, unseen patient (Target Domain) without accessing the original training data.
+The whole project tests one causal chain, and every experiment below exists to validate a specific link in it:
+
+1. A neural network trained to MAP on source data only becomes overconfident under domain shift (calibration breaks on target data). This is a known failure mode of deep learning models, and it is particularly problematic in safety-critical applications like assistive robotics.
+2. A post-hoc Bayesian treatment (Kronecker-Factored Laplace Approximation, KFLA) yields a predictive epistemic variance that grows systematically as samples move farther from the source distribution (variance acts as a shift detector).
+3. That same variance signal can drive adaptation: down-weighting high-uncertainty samples during entropy-based adaptation lets the optimization be steered mainly by reliable target samples.
+
+We want to apply Source-Free Domain Adaptation (SFDA) in assistive robotics, specifically for power-assist exoskeletons. The goal is to adapt a myoelectric (EMG) controller, pre-trained on a pool of healthy subjects (Source Domain), to a new, unseen patient (Target Domain) without accessing the original training data.
 
 ## Dataset: Lower Limb Surface Electromyography (sEMG)
 
