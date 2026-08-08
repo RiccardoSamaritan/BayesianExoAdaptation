@@ -1,382 +1,369 @@
 # Project TODO
 
-Uncertainty-guided SFDA (U-SFAN replication + extension), applied to **real** sEMG-based
+Uncertainty-guided SFDA (U-SFAN replication + extension), applied to sEMG-based
 exercise/locomotion-mode recognition, source = healthy subjects, target = subjects with
-diagnosed knee pathologies. This is v3: v2 was written against UCI HAR/HAPT (IMU,
-pre-engineered features, surrogate exoskeleton framing) before the dataset changed to
-BASAN. Everything below reflects the real dataset, real code already in the repo, and
-real numbers already obtained — not a plan written in the abstract.
-
-Status legend: [x] done and checked, [~] done but flagged as provisional/noisy,
-[ ] not started.
+diagnosed knee pathologies. This supersedes v2 (written against UCI HAR/HAPT before the
+dataset changed to BASAN).
 
 ---
 
-## 0. Locked decisions
+## 0. Dataset facts (documentation, not results — read before writing the parser)
 
-- [x] **Dataset: BASAN sEMG** (UCI ML repo #278). 22 male subjects, 4 sEMG channels
-      (RF, BF, VM, ST) + 1 goniometer channel (FX, knee flexion angle), sampled at
-      1000 Hz, 14-bit. 11 NORMAL (healthy) + 11 ABNORMAL (6 ACL, 4 meniscus, 1 sciatic
-      nerve injury — per-subject mapping not available in our files, see §9).
-- [x] **Task: 3-class exercise recognition** — `WALKING` (marcha), `KNEE_FLEXION_STANDING`
-      (depie), `LEG_EXTENSION_SEATED` (sentado). This is not a surrogate for anything —
-      it's directly the intent-recognition problem a lower-limb assistive device would
-      need to solve, on real EMG.
-- [x] **Source = NORMAL pool, target = ABNORMAL, one target domain per subject** (11
-      target domains, not up to 30 like the old HAR plan — smaller dataset, smaller n
-      for any correlation across domains, keep this in mind for statistical claims).
-      This replaces the old "surrogate exoskeleton" framing: NORMAL→ABNORMAL is a real,
-      clinically meaningful distribution shift, not a stand-in for one.
-- [x] **No synthetic shift on real data.** Subject-wise splits only, never window-wise.
-      Standardization (`StandardScaler`) fit on NORMAL only, applied to ABNORMAL —
-      done in `experiments/train_map.py`.
-- [x] **Windows: 200 ms (200 samples @ 1000 Hz), non-overlapping.** Chosen from the
-      start (not retrofitted like the HAR overlap fix), so the i.i.d. assumption behind
-      the Hessian sum (§0b) holds without a correction step.
-- [x] **27 hand-engineered features**, not 561 like HAR: classic Hudgins time-domain set
-      (MAV, RMS, WL, ZC, SSC, VAR) × 4 EMG channels = 24, plus 3 goniometer summary
-      stats (mean angle, range, mean |velocity|). Implemented in `data/basan_features.py`.
-- [x] **Architecture rescaled accordingly**: `27 → 32 → 16 → 3` (config.py), not
-      `561 → 128 → 64 → K`. Last-layer augmented params: K·(F+1) = 3·17 = 51, even
-      smaller than the HAR estimate of 195 — makes the "KFAC is unnecessary here,
-      it's an object of study" argument in §5 even stronger.
-- [x] **Bayesian treatment: last layer only.** Feature extractor deterministic at
-      β_MAP. Same textbook-equivalence argument as before (notes §7.4): this is
-      Bayesian multi-class logistic regression with φ(x) = g_β(x) learned.
-- [x] **Class-weighted loss is NOT optional here — it's load-bearing.** NORMAL source
-      pool is imbalanced (WALKING ≈ 17% of train windows vs ≈ 46% for
-      LEG_EXTENSION_SEATED). Confirmed empirically: unweighted CE gives WALKING recall
-      ≈ 0.31 (chance-level, three-way); inverse-frequency weighting brings it to 0.557.
-      **Primary source-val metric is macro-averaged recall (balanced accuracy), not
-      raw accuracy** — raw accuracy is misleading under this imbalance and actually
-      *drops* when the fix is applied (0.766 → 0.697) because it stops getting a free
-      ride from majority classes.
-- [ ] During target adaptation: update β, freeze θ (unchanged from v2, not yet
-      implemented for this dataset — §8).
-- [ ] Posterior q(θ) stays fixed at β_MAP features during adaptation (unchanged
-      approximation, goes in Limitations, §10).
-- [ ] Uncertainty recomputed every minibatch during adaptation (§8, not yet built).
-- [ ] Weight applies only to the conditional-entropy term, never L_div (§8).
-- [x] **Hyperparameters**: γ = 0.5, τ = 0.4 (paper values). τ = 0.4 is *not* just
-      inherited without checking — confirmed empirically on real target subjects that
-      τ = 0.4 exposes more epistemic signal than τ = 1.0 (mean epistemic fraction
-      0.044 vs 0.012 across target subjects). Worth a sentence in the report: the
-      paper's choice does something real here, not just cosmetic.
-- [ ] No target labels used for model selection — holds so far (early stopping and
-      class weights are computed on source only); keep enforcing this in §8.
-- [x] One config file (`config/config.py`), all seeds, no hardcoded values scattered
-      around.
-- [ ] Seeds: currently only seed 0 has been run end-to-end. **5 seeds minimum before
-      any correlation number goes in the report** — see §7, the single-seed Spearman
-      estimate was unstable (−0.42 to −0.65 depending on temperature/MC sample count).
+- **BASAN sEMG** (UCI ML repo #278). 22 male subjects: 11 NORMAL (healthy), 11
+  ABNORMAL (diagnosed knee pathology — per the literature, a mix of ACL injury,
+  meniscus injury, and sciatic nerve injury, but per-subject etiology is not present
+  in the raw files here, only the group label).
+- 4 sEMG channels — RF (Rectus Femoris), BF (Biceps Femoris), VM (Vastus Medialis),
+  ST (Semitendinosus), in mV — plus 1 goniometer channel FX (knee flexion angle, deg).
+- Sampling rate: 1000 Hz, 14-bit resolution (per BASAN documentation; not stated
+  inside the files themselves).
+- 3 exercises per subject, filename-encoded as `{subject_id}{A|N}{exercise}.txt`:
+  `mar` = marcha (walking/gait), `pie` = depie (standing, knee flexion), `sen` =
+  sentado (seated, knee extension). 11 subjects × 3 exercises × 2 groups = 66 files.
+- **File format quirks to handle, not assume away:**
+  - 6-line metadata header ("File Name: ..." + 5× "Channel k: ..." description
+    lines), CRLF line endings, tab-separated data after a blank line.
+  - A subset of files (9 of 66, per a prior look at the raw data — verify this count
+    yourself) carry a 6th column ("Digitals combined ..." in the header) that was
+    found to be a constant event marker with no information. Confirm this is still
+    true before dropping it silently; don't assume a fixed column count across all
+    files.
+  - Don't hardcode "skip N header lines" — detect the first line that parses as
+    the expected number of tab-separated floats instead, since header length was
+    observed to vary between files.
+- No per-subject injury-etiology mapping is available in this repo's data folder —
+  relevant for the open-set decision in §9.
+- No postural-transition data exists in BASAN (unlike the HAPT dataset from the v2
+  plan) — the old open-set idea does not port over as-is (§9).
 
 ---
 
-## 0b. Conventions & bug traps
+## 1. Locked design decisions
 
-- [x] **Prior precision convention validated, not just assumed.** τ_prior =
-      weight_decay × N_source. Validated two ways in `tests/`:
-      1. `test_hessian_binary.py` — the K-class softmax Hessian reduces to the exact
-         binary logistic-regression formula from notes §7.4 (max abs diff ~3.5e-15).
-      2. `test_laplace_vs_mcmc.py` — Laplace predictive (total entropy, epistemic,
-         aleatoric) agrees with true Metropolis-Hastings posterior samples on a small
-         problem (K=3, 9 params) within tolerance (mean |diff| < 0.03 nats).
-      Both pass. Convention is documented directly in `laplace/hessian.py`'s docstring.
-- [x] **Overlap avoided by construction**, not corrected after the fact — 200ms
-      windows are non-overlapping from the first line of `basan_features.py`.
-- [ ] **Kronecker + prior interaction** (√τ on eigenvalues, not τI added post-hoc) —
-      not yet relevant since KFAC (§5) hasn't been implemented; exact Hessian is used
-      throughout so far because at 51 params it's trivial to invert directly.
-- [ ] **Absolute normalization of the epistemic signal** (source quantiles, not
-      per-batch) — not yet needed since down-weighting (§8) hasn't been built, but
-      keep the rule when it is.
-- [x] **New bug trap specific to this dataset: class imbalance breaks MAP training
-      itself, not just L_div.** The v2 TODO only flagged imbalance as an L_div
-      concern during adaptation. On BASAN it's more fundamental — an unweighted MAP
-      classifier fails to learn the minority class at all. Anything built on top
-      (Hessian, BALD, adaptation) inherits a broken feature extractor if this isn't
-      fixed first. Fixed in `experiments/train_map.py` via inverse-frequency
-      `CrossEntropyLoss(weight=...)`; re-verify after every architecture change.
-- [ ] **Per-subject window count is highly uneven** (187 to 820 windows per ABNORMAL
-      subject — a 4.4× range) because recordings have different durations, not
-      because of a fixed protocol length. This means per-subject accuracy estimates
-      have very different sample sizes; report confidence intervals or at least
-      window counts alongside every per-subject number, and don't treat a subject
-      with 187 windows and one with 820 as equally reliable point estimates.
-
----
-
-## 1. Data pipeline — DONE, documented here for the report
-
-- [x] **Parser** (`data/basan_parser.py`): handles the 6-line metadata header (File
-      Name + 5× Channel description lines), CRLF line endings, tab-delimited data.
-      Robust to a dataset quirk found during implementation: 9 of 66 files have a 6th
-      "Digitals combined" column (verified constant, e.g. always 31 — an event marker
-      with no information) which is detected and dropped rather than hardcoded away.
-      Filename encodes subject id, group (A/N), exercise (mar/pie/sen) via regex.
-- [x] All 66 files parse correctly (11 subjects × 3 exercises × 2 groups, no missing
-      files). Verified duration (15–25s per recording), EMG range (mV), knee angle
-      range (up to ~105°) are all physiologically sane.
-- [x] **Feature extraction** (`data/basan_features.py`): 200ms non-overlapping
-      windows → 6592 total windows, 27 features. Hudgins TD set per EMG channel,
-      3 summary stats for the goniometer channel.
-- [x] **Sanity check before touching any model** (`experiments/basan_sanity_check.py`):
-      PCA (fit on NORMAL only) of per-subject centroids. **Honest finding: NORMAL and
-      ABNORMAL centroids partially overlap** — ABNORMAL-vs-source-mean distances range
-      1.98–5.05, NORMAL-internal (leave-one-out) distances range 1.01–3.41. The ranges
-      overlap. This is reported as-is: the shift is a continuum tied to pathology
-      severity/type, not a clean binary separation. This is a *more* honest and
-      arguably more realistic finding than a clean cluster split would have been —
-      say so explicitly in the report rather than treating it as a problem to fix.
-- [x] Class balance logged (§0). WALKING underrepresented in NORMAL source pool.
-- [ ] **Shift proxy, second method.** Centroid distance is implemented; still need
-      an AUROC-of-a-domain-classifier proxy (source-vs-target logistic regression on
-      the 27 features) to check rank agreement with centroid distance, per the
-      original multi-proxy-agreement idea. Cheap to add, do it before §7's
-      shift-vs-uncertainty correlation is treated as final.
-- [x] Subject-wise split enforced for source train/val (`subject_split()` in
-      `train_map.py`), not window-wise.
-- [x] Hardest / easiest target subjects identified for §6: subject 2 (MAP acc 0.364,
-      near chance) and subject 3 (MAP acc 0.847). Checked subject 2's low accuracy is
-      **not** a target-side class-imbalance artifact (its own exercise counts are
-      55/64/68, fairly balanced) — so the difficulty is a genuine shift/pathology
-      effect, which is what makes it a clean test case for §6.
+- **Task: 3-class exercise recognition** — `WALKING`, `KNEE_FLEXION_STANDING`,
+  `LEG_EXTENSION_SEATED`. This is directly the intent-recognition problem, not a
+  surrogate for one.
+- **Source = NORMAL pool, target = ABNORMAL, one target domain per subject** (11
+  target domains). This is a real clinically-meaningful shift, not a stand-in.
+- **No synthetic shift on real data.** Subject-wise splits only, never window-wise.
+  Standardization fit on NORMAL only, applied to ABNORMAL.
+- **Windows: 200 ms (200 samples @ 1000 Hz), non-overlapping.** Decide this up front
+  rather than fixing an overlap problem later — non-overlap keeps the i.i.d.
+  assumption behind the last-layer Hessian sum valid without a correction step.
+- **Feature set: hand-engineered, not learned**, at least for the main track.
+  Classic Hudgins time-domain set per EMG channel — MAV, RMS, WL, ZC, SSC, VAR —
+  giving 6 × 4 = 24 features, plus a small number of goniometer summary stats
+  (e.g. mean angle, range, mean |velocity|) for the FX channel. Expect a feature
+  dimension in the 25-30 range, much smaller than UCI HAR's 561 — architecture
+  should be scaled down accordingly (a small MLP, not the 561→128→64 one from the
+  old plan).
+- **Bayesian treatment: last layer only.** Feature extractor deterministic at
+  β_MAP. Same textbook-equivalence argument as before (notes §7.4): this is
+  Bayesian multi-class logistic regression with φ(x) = g_β(x) learned.
+- **Check class balance before trusting any accuracy number.** Gait/exercise data
+  from a fixed protocol is not guaranteed to be balanced across exercises or across
+  subjects (recordings may differ in duration). If one exercise is underrepresented,
+  a class-weighted loss (inverse frequency) is likely necessary, and **macro-averaged
+  recall (balanced accuracy), not raw accuracy**, should be the primary source-val
+  metric to watch — raw accuracy can look fine while a minority class is essentially
+  unlearned. Verify this concretely rather than assuming it's fine or assuming it's
+  broken.
+- During target adaptation: update β (feature extractor), freeze θ (classifier
+  head) — paper's setup (Fig. 3b). If both are frozen there is nothing to adapt and
+  all ablation arms collapse to the same thing.
+- Posterior q(θ) stays fixed at the β_MAP features throughout adaptation — an
+  approximation, not an implementation detail, goes in Limitations (§10).
+- Uncertainty recomputed every minibatch during adaptation (not frozen at the
+  start) — features move as β moves.
+- Down-weighting applies only to the conditional-entropy term of the IM loss,
+  never to the diversity term L_div.
+- Hyperparameters fixed a priori from the paper: γ = 0.5, τ = 0.4. Any deviation
+  should be justified on a source validation split only, never by looking at target
+  performance.
+- No target labels used for model selection, ever — no early stopping on target
+  accuracy, no LR chosen by looking at target ECE.
+- One config file, all seeds, no hardcoded values scattered around.
+- Multiple seeds (5 recommended) for every reported number — no single-seed result
+  should be treated as final, especially for any correlation computed across only
+  ~11 target domains.
 
 ---
 
-## 2. Synthetic track — DONE
+## 1b. Conventions & bug traps to watch for
 
-- [x] 2D, 3-class toy replicating paper Fig. 4 (`experiments/toy_fig4.py`). Mild and
-      strong shift both reproduce the paper's qualitative story: under strong shift,
-      target points fall under the wrong MAP decision region ("flipped" boundary,
-      matching Fig. 4b); epistemic uncertainty (BALD) forms the expected V-shaped
-      bands radiating away from the source blobs (matches Fig. 2b's OOD-detection
-      story); aleatoric uncertainty concentrates at in-distribution decision
-      boundaries.
-- [x] Semantic validation on the toy: far-from-source point → 76% of total
-      uncertainty is epistemic; near-boundary in-distribution point → 14% epistemic
-      (86% aleatoric). Matches the expected pattern exactly.
-- [ ] `make_classification()` sweep with ground-truth shift magnitude — not done,
-      lower priority now that real data is the main track and already shows a
-      (noisy) real correlation. Keep as an appendix figure if time allows, mainly
-      useful as an "ideal case" contrast against the real-data noise in §7.
-
----
-
-## 3. Source MAP training — DONE for seed 0, needs multi-seed
-
-- [x] `experiments/train_map.py`: subject-wise train/val split within NORMAL,
-      class-weighted cross-entropy, early stopping on val loss.
-- [x] Seed 0 result: source val macro-recall 0.790 (WALKING 0.557, the other two
-      ≈0.90–0.91). Target (ABNORMAL) subject accuracy: mean 0.688, range
-      0.364–0.847, std 0.130.
-- [x] **No saturation problem** — opposite situation from the original UCI HAR
-      concern. Plenty of headroom to show an adaptation effect; the risk here is the
-      opposite one (task hard enough that the *baseline* needs to be trustworthy
-      before building the Bayesian story on top).
-- [ ] Run 5 seeds, report mean ± std for source val macro-recall and per-subject
-      target accuracy. Single-seed numbers above are provisional.
-- [ ] Open question for the report, not yet resolved: WALKING remains the hardest
-      class even after re-weighting (recall 0.557 vs ~0.90 for the static exercises).
-      Plausible physiological explanation to state explicitly: WALKING is the only
-      *dynamic, cyclic* movement in the protocol — a fixed 200ms window can land in
-      different phases of the gait cycle, adding within-class variability that
-      KNEE_FLEXION_STANDING and LEG_EXTENSION_SEATED (held static postures) don't
-      have. This is a content-level limitation, not obviously a bug — but confirm by
-      checking per-window feature variance for WALKING vs the other two classes
-      before asserting it in the report.
+- **Prior precision convention.** The exact last-layer Hessian (notes §7.4) sums
+  over data:
+  $$ \mathbf{S}_N^{-1} = \mathbf{S}_0^{-1} + \sum_{n=1}^{N} s_n(1-s_n)\,\phi(x_n)\phi(x_n)^{T} $$
+  If training uses `reduction='mean'` cross-entropy plus weight decay λ, the prior
+  precision consistent with the summed Hessian is τ ≈ λ·N (with PyTorch's
+  `weight_decay` convention specifically — re-derive if using a different framework
+  or a different weight-decay convention). Do not assume τ = λ. Write the
+  correspondence down explicitly and test it (see below) rather than trusting it by
+  inspection — a wrong convention gives predictive variances that are silently
+  wrong (too tight or too wide), not an error.
+- **Validate the Hessian two ways before building anything on top of it:**
+  1. Reduce to K=2 classes and check against the exact binary formula in the notes
+     (§7.4) term by term.
+  2. On a small synthetic problem (small N, small parameter count), compare the
+     Laplace predictive distribution against real Metropolis-Hastings or HMC
+     samples of the true posterior. This is the test that actually catches a wrong
+     prior-precision convention — the binary-reduction check alone won't catch a
+     scaling error that affects both sides equally.
+- **Kronecker structure does not survive adding the prior naively.** If/when KFAC
+  is implemented (§5), adding τI to a Kronecker-factored V ⊗ U breaks the
+  factorization; add √τ to each factor's eigenvalues instead.
+- **Class imbalance can break MAP training itself, not just the adaptation
+  diversity term.** The v2 plan (written for UCI HAR) only flagged imbalance as an
+  L_div concern during adaptation. On a smaller, protocol-driven dataset like this
+  one, check whether an unweighted classifier fails to learn a minority class
+  entirely before assuming the imbalance is a minor issue — verify per-class
+  recall, not just overall accuracy, on the source validation set.
+- **Per-subject sample counts may be very uneven** if recordings have different
+  durations rather than a fixed protocol length. Report window counts alongside
+  every per-subject number, and don't treat subjects with very different amounts of
+  data as equally reliable point estimates.
+- **Absolute normalization of the epistemic signal**, never per-batch. Per-batch
+  standardization makes weights relative within a batch — even an unshifted target
+  would have half its samples down-weighted, and weights stop being comparable
+  across subjects/shift levels. Use log K (BALD's upper bound) or quantiles of BALD
+  computed on a held-out source split.
 
 ---
 
-## 4. Exact last-layer Laplace — DONE and validated
+## 2. Data pipeline
 
-- [x] `laplace/hessian.py`: exact GGN Hessian for the K-class softmax last layer,
-      self-contained augmented-weight convention (bias folded into φ via a constant
-      column), documented and asserted prior-precision convention.
-- [x] **Validation 1** (`tests/test_hessian_binary.py`): K=2 case reduces to the exact
-      binary formula in notes §7.4. Passes at machine precision.
-- [x] **Validation 2** (`tests/test_laplace_vs_mcmc.py`): compared against real
-      Metropolis-Hastings sampling (K=3, 9 params, tuned to ~33% acceptance rate).
-      Laplace total/epistemic/aleatoric entropy all agree with MCMC within
-      tolerance. This is the test that would have caught a wrong τ_prior — it didn't
-      fire, so the convention in §0b is trustworthy, not just plausible.
-- [x] Applied to the real trained model (`experiments/laplace_on_real_data.py`):
-      posterior fit on 1823 source windows, 51 augmented params, Hessian condition
-      number 6.3e3 (healthy, no near-singularity).
-- [ ] Convergence check (mean BALD vs number of MC samples) — not yet run on real
-      data; do this before finalizing S in the config.
-
----
-
-## 5. KFAC as an object of study
-
-Even more clearly unnecessary here than in the original HAR plan: 51 total augmented
-last-layer parameters. The exact Hessian is a 51×51 matrix, inverted directly in
-milliseconds. Framing is unchanged from v2 — implement KFAC anyway and measure what
-it costs in accuracy, not because it's needed.
-
-- [ ] Not started. Same plan as v2 §5: implement the Kronecker approximation, note
-      explicitly that the exact sum does not factor (KFAC adds an independence
-      assumption), fix the prior via √τ on eigenvalues, and measure predictive
-      variance / ECE / BALD-ranking (Spearman/Kendall) error against the exact
-      Hessian already implemented in §4.
+- [ ] Write the parser: handle the header quirks in §0, extract subject id / group
+  / exercise from the filename, verify all 66 files parse and produce physiologically
+  sane ranges (EMG in mV, knee angle in a plausible degree range).
+- [ ] Windowing + feature extraction: 200ms non-overlapping windows, Hudgins
+  time-domain features per EMG channel, goniometer summary stats. Save the
+  resulting feature table.
+- [ ] Check class balance (windows per exercise, per group, per subject) before
+  doing anything else with the features.
+- [ ] Sanity check before touching any model: PCA (fit on NORMAL only) of
+  per-subject centroids, plus a source-vs-target scatter. Confirm NORMAL → ABNORMAL
+  actually looks like a distribution shift rather than assuming it does. Also
+  compute within-NORMAL leave-one-subject-out centroid distances as a "near-zero
+  shift" reference to compare the ABNORMAL shift magnitudes against.
+- [ ] Subject-wise train/val split within NORMAL (not window-wise) for source
+  model selection.
+- [ ] Shift proxy per target subject: at least centroid distance in feature space;
+  ideally also AUROC of a source-vs-target domain classifier, checked for rank
+  agreement with the centroid-distance proxy.
+- [ ] Identify candidate hardest/easiest target subjects for the §6 semantic
+  validation, and check whether any observed difficulty is a target-side class
+  imbalance artifact or a genuine shift effect before using a subject as a clean
+  test case.
 
 ---
 
-## 6. Uncertainty decomposition — partially validated, needs stabilizing
+## 3. Synthetic track (optional, for intuition and slides)
 
-- [x] BALD decomposition implemented and unit-tested against MCMC (§4).
-- [x] **Real-data semantic check, first pass** (`experiments/laplace_on_real_data.py`):
-      computed epistemic fraction per target subject. Result: **direction is
-      correct but the effect is subtle.**
-      - Hardest subject (2, acc 0.364): epistemic fraction 0.058
-      - Easiest subject (3, acc 0.847): epistemic fraction 0.032
-      - Source val (in-distribution reference): epistemic fraction 0.029
-      - Spearman(MAP accuracy, epistemic fraction) across 11 target subjects:
-        rho ≈ −0.5 to −0.65 depending on temperature and MC sample count (single
-        seed, n=11 — **not stable yet**, see below).
-      - Epistemic fraction is small everywhere (3–8% of total uncertainty); most of
-        the predictive uncertainty on this dataset is aleatoric, at every shift
-        level including the hardest subject. This is a real and reportable finding
-        in itself — the per-subject shift here (same protocol, same sensors, healthy
-        vs. pathological knee) is much milder than the synthetic toy's deliberately
-        large translation, so a much smaller effect size is actually expected, not
-        a sign the machinery is broken (confirmed working via §4's validations).
-      - τ = 0.4 exposes more epistemic signal than τ = 1.0 (mean epistemic fraction
-        0.044 vs 0.012) — worth keeping as an explicit ablation in the report rather
-        than a footnote.
-- [ ] **Not yet done, blocking before this becomes a reported result:** re-run with
-      (a) more MC samples (convergence-checked per §4, not just the config default),
-      (b) multiple seeds for the MAP model itself, (c) report the Spearman
-      correlation with a confidence interval or at least the range across seeds,
-      not a single point estimate. The single-seed number swung from −0.42 to −0.65
-      just from changing temperature/sample count — that swing needs to be
-      characterized, not hidden behind one reported value.
-- [ ] The old UCI-HAR-specific validation (SITTING vs STANDING as the
-      aleatoric-dominant in-distribution confusion) doesn't transfer — no equivalent
-      static-posture confusion pair exists in this 3-class task. Replacement
-      candidate: check whether **WALKING** (the hardest, most variable class per §3)
-      shows elevated *aleatoric* (not epistemic) uncertainty specifically on
-      in-distribution (NORMAL val) data — that would support the "WALKING is
-      harder because of genuine within-class variability, not distribution shift"
-      explanation from §3.
-- [ ] Absolute normalization of epistemic signal (source quantiles) — not yet
-      needed until §8 is built, but decide before then.
+- [ ] 2D, 3-class toy replicating paper Fig. 4: mild vs strong shift, decision
+  surfaces shaded by predictive certainty, epistemic/aleatoric maps. Useful as an
+  "ideal case" reference to contrast against whatever the real data shows in §7 —
+  do this before or alongside the real-data track, not as an afterthought.
+- [ ] Semantic sanity check on the toy: a point far from all source data should be
+  epistemic-dominant; a point near a decision boundary but inside the source
+  support should be aleatoric-dominant. If this doesn't hold, there's a bug in the
+  BALD implementation — find it here, on a controlled problem, before trusting it
+  on real data.
+- [ ] `make_classification()` sweep with ground-truth shift magnitude, if time
+  allows — lower priority than the real-data track.
 
 ---
 
-## 7. Calibration check — not started with proper rigor
+## 4. Source MAP training
 
-Everything here is unchanged in spirit from v2, but nothing has been run yet beyond
-the provisional single-seed numbers in §6.
-
-- [ ] Reliability diagrams, MAP vs LA, source and each target subject.
-- [ ] ECE, NLL, Brier — MAP vs LA, multi-seed mean ± std.
-- [ ] AUROC for misclassification detection (does uncertainty separate correct from
-      incorrect predictions?).
-- [ ] Accuracy-vs-coverage curve (reject on high epistemic uncertainty) — the
-      operational metric for the clinical/assistive framing, and now more literally
-      justified than in the HAR plan: this is actually healthy-vs-pathological data.
-- [ ] Second shift proxy (domain-classifier AUROC, §1) and rank agreement with
-      centroid distance.
-- [ ] **Formal multi-seed Spearman correlation** between shift proxy and mean
-      epistemic uncertainty — supersedes the provisional §6 numbers.
-- [ ] Plots: ECE vs shift proxy, epistemic-vs-shift-proxy with seed bands,
-      reliability diagrams at low/mid/high shift tercile, accuracy-vs-coverage.
-
-**Check before moving on:** with 5 seeds and a converged MC sample count, does the
-Spearman correlation stabilize to something reportable (consistent sign, reasonable
-CI), or does it stay noisy? If it stays noisy even after that, the honest conclusion
-may be "the effect is real but small on this dataset, unlike the synthetic case" —
-that is a legitimate and reportable finding, not a failure, provided §4's validations
-(which passed) rule out an implementation bug as the explanation.
+- [ ] Small MLP sized to the actual feature dimension (see §1 — expect ~25-30
+  input features, not 561), subject-wise source train/val split, class-weighted
+  cross-entropy if §2's balance check shows it's needed.
+- [ ] Track macro-averaged recall (balanced accuracy) on source val as the primary
+  metric, not just raw accuracy.
+- [ ] Evaluate on each ABNORMAL subject as a separate target domain; check whether
+  the resulting accuracy range gives enough headroom to show an adaptation effect
+  (a saturated near-ceiling baseline, or a collapsed near-chance baseline, both make
+  the rest of the project hard to interpret).
+- [ ] If one exercise class remains hard to classify even after balancing, consider
+  whether there's a content-level explanation (e.g. a dynamic/cyclic movement vs.
+  static held postures within a fixed-length window) before assuming it's purely a
+  data or hyperparameter problem — check per-class feature variance as one way to
+  test this.
 
 ---
 
-## 8. Adaptation + ablation (6 arms) — not started
+## 5. Exact last-layer Laplace (reference implementation, do this before KFAC)
 
-Unchanged in structure from v2 (see arms (a)–(f) and the isolation logic — (c)→(d)
-isolates re-weighting, (d)→(e) isolates the Bayesian treatment, (e)→(f) isolates
-which uncertainty). Dataset-specific notes:
-
-- [ ] Class-imbalance interaction with L_div (§0b in v2) applies here too, and is
-      now confirmed to matter even more than expected (§0): consider a source-
-      estimated class prior instead of uniform in L_div, given how skewed WALKING is.
-- [ ] Given only 11 target domains (not ~30), consider whether per-shift-tercile
-      breakdown (low/mid/high) is statistically meaningful at this n, or whether a
-      continuous regression (accuracy/ECE gain vs. shift proxy) is more honest than
-      binning into terciles of ~3-4 subjects each.
-- [ ] Everything else (freeze θ / update β, recompute uncertainty per minibatch,
-      weight only the conditional-entropy term, fixed γ/τ) — carries over unchanged
-      from v2 §8, not yet implemented.
+- [ ] Exact GGN Hessian of the last layer: for K classes and augmented feature dim
+  D (features + 1 for the bias), $H = \sum_n \Lambda_n \otimes \phi_n\phi_n^T + \tau I$
+  with $\Lambda_n = \mathrm{diag}(p_n) - p_n p_n^T$. With a small feature dimension
+  here, this matrix should be small enough to build and invert directly — no need
+  for Kronecker factorization for tractability reasons (see §6).
+- [ ] Validation 1: reduce to K=2 and check against the binary formula in notes §7.4.
+- [ ] Validation 2: compare against Metropolis-Hastings/HMC on a small synthetic
+  problem with the same structure (see §1b).
+- [ ] MC predictive distribution and BALD decomposition, with a convergence check
+  (mean BALD vs. number of MC samples) before fixing S in the config.
 
 ---
 
-## 9. Open-set — needs a new plan, HAPT-based idea does not apply
+## 6. KFAC as an object of study, not a necessity
 
-- [x] **Confirmed: BASAN has no postural-transition data** (per the dataset's own
-      documentation) and **no per-subject injury-etiology file** is present in this
-      repo (checked — only the two `A_TXT`/`N_TXT` folders and the raw signal files
-      exist; the 6/4/1 ACL/meniscus/sciatic breakdown is only available in the
-      literature, not per-subject-ID here). The v2 HAPT-transitions plan cannot be
-      ported as-is.
-- [ ] **Decision needed** on which replacement, if any:
-      (a) Drop open-set entirely, note it as future work requiring access to the
-          per-subject etiology labels (e.g. by contacting the dataset authors or
-          finding a version of BASAN with subject-level metadata).
-      (b) Leave-one-exercise-out as a weaker substitute: train source on 2 of the 3
-          exercises, treat the 3rd as target-private in the ABNORMAL target set.
-          Not the same phenomenon (it's a label-space shift within a healthy-vs-
-          pathological shift, conflating two things at once), but exercises fastest
-          to implement with existing code.
-      (c) If per-subject etiology can be obtained from the original paper/dataset
-          documentation (worth 15 minutes of checking before giving up on it): use
-          etiology as the OOD structure, e.g. train source excluding sciatic-nerve
-          subjects, treat that etiology as target-private. This is the most
-          clinically meaningful version if the labels can be found.
-      Recommendation: try (c) first (cheap to check), fall back to (a) if the
-      per-subject mapping isn't recoverable, treat (b) as a last resort since it
-      muddies the shift being studied.
+With the small feature dimension expected here, the last-layer parameter count will
+likely be small enough that Kronecker factorization buys nothing computationally —
+Ritter et al. need it for a much larger bottleneck/class-count combination. So:
+
+- [ ] Implement KFAC anyway, but frame it as "what does this approximation cost?"
+  rather than "this is necessary." State explicitly that the exact sum does not
+  factor into a single Kronecker product — KFAC adds an independence assumption.
+- [ ] Fix the prior via √τ on each factor's eigenvalues, not τI added after
+  factorizing.
+- [ ] Measure the approximation error against the exact Hessian from §5: predictive
+  variance, ECE, and — most relevant for the downstream weighting — Spearman/Kendall
+  rank correlation of the BALD ordering, since the down-weighting only consumes the
+  ranking, not the exact magnitude.
 
 ---
 
-## 10. Report & presentation
+## 7. Uncertainty decomposition + semantic validation
 
-- [x] Anchoring to course notes (unchanged from v2 — §7.3, §7.4, §2.3, §10.6, ch. 8)
-      still fully applies; the validations in §4 are now the concrete artifact that
-      makes "ch. 8 sampling used as ground truth" literally true rather than aspirational.
-- [ ] **Limitations section — substantially different from v2, write fresh:**
-      - Posterior staleness and LA's local/unimodal nature — unchanged from v2.
-      - **The exoskeleton framing is stronger here than in the HAR plan** (real
-        pathological subjects, not healthy-subjects-only), but new limitations
-        specific to this dataset: single joint (knee) rather than whole-limb
-        multi-joint intent recognition; 4 fixed EMG electrode sites that may not
-        match a given exoskeleton's sensor placement; all subjects male (per BASAN
-        documentation), so no claims about generalization across sex; the ABNORMAL
-        population (ACL/meniscus/sciatic nerve) doesn't necessarily represent the
-        typical exoskeleton user population (e.g. stroke, spinal cord injury);
-        offline windowed classification, not causal real-time; no cost asymmetry
-        between confusion types; small n (11 target domains) limits the statistical
-        power of any shift-vs-uncertainty correlation claim (§7).
-      - State plainly if §7's correlation stays weak-but-consistent after
-        stabilization: the honest interpretation is that inter-subject shift in this
-        dataset is real but mild relative to the synthetic case, not that the method
-        doesn't work — supported by the fact that the same machinery, validated
-        against MCMC in §4, shows the large expected effect on synthetic data.
-      - Open-set section's fate (§9) — state clearly which option was taken and why.
-- [ ] Model-selection protocol sentence — unchanged requirement from v2.
+- [ ] BALD epistemic/aleatoric split, unit-tested against MCMC (§5) before trusting
+  it on real data.
+- [ ] Write down explicitly (for the report, and to avoid confusing the two in
+  code) that the IM loss's marginal/conditional entropy terms (§9) and BALD have
+  the same functional form H[p̄] − H[p] but average over different things — data vs.
+  weights. Two different mutual informations.
+- [ ] Semantic validation on real data: check whether the hardest target subject
+  (by MAP accuracy) shows elevated epistemic uncertainty relative to an easy target
+  subject and relative to the source validation set. Also check whether the
+  hardest-to-classify exercise class (if one exists after §4) shows elevated
+  *aleatoric* (not epistemic) uncertainty in-distribution — that would support a
+  genuine-ambiguity explanation over a shift explanation for that class.
+- [ ] Absolute normalization of the epistemic signal (source quantiles or log K),
+  never per-batch.
+- [ ] Check whether the temperature τ (paper default 0.4) meaningfully changes the
+  balance between epistemic and aleatoric signal on this data — don't just inherit
+  the paper's value without checking what it does here.
 
 ---
 
-## 11. Eventually / stretch
+## 8. Calibration check
 
-- [ ] Full-network KFAC vs last-layer (unchanged from v2).
-- [ ] MC dropout / small ensemble comparison (unchanged from v2).
-- [ ] Given real raw EMG is already available (unlike UCI HAR's pre-engineered
-      features), a stretch worth more here than in v2: compare the 27 hand-engineered
-      Hudgins features against a learned 1D-conv feature extractor on raw sEMG
-      windows, and check whether the epistemic-uncertainty-vs-shift correlation
-      strengthens with learned features — directly tests whether §7's weak signal is
-      a feature-engineering ceiling rather than a property of the shift itself.
-- [ ] Cost-sensitive rejection (unchanged from v2, arguably more defensible now
-      given the genuinely clinical population).
+- [ ] Reliability diagrams, MAP vs Laplace, source and every target subject.
+- [ ] ECE, NLL, Brier score — MAP vs Laplace, multi-seed mean ± std, not
+  single-run numbers.
+- [ ] AUROC for misclassification detection (does the uncertainty separate correct
+  from incorrect predictions?).
+- [ ] Accuracy-vs-coverage curve (reject predictions above an epistemic-uncertainty
+  threshold) — the operational metric for the clinical/assistive framing.
+- [ ] Spearman correlation between shift proxy (§2) and mean epistemic uncertainty
+  across target subjects, with multiple seeds and a converged MC sample count
+  before treating any single correlation value as final — with only ~11 target
+  domains, a single-seed estimate should be expected to be noisy.
+- [ ] Plots: ECE vs. shift proxy, epistemic uncertainty vs. shift proxy with seed
+  bands, reliability diagrams at low/mid/high shift, accuracy-vs-coverage.
+
+**Check before moving on:** does epistemic uncertainty correlate with the shift
+proxy across target subjects, and is the Laplace-based model better calibrated than
+MAP on the more-shifted subjects? If the signal is weak or noisy even after
+multiple seeds, first rule out an implementation issue via §5's validations (if
+those pass on synthetic data, the machinery itself is trustworthy) before
+concluding the real-data effect is genuinely small — both are legitimate, but they
+support different conclusions in the report.
+
+---
+
+## 9. Adaptation + ablation (6 arms)
+
+- [ ] IM objective (not plain entropy minimization, which is known to collapse to
+  one class):
+  $$ \mathcal{L}_{\text{IM}} = \underbrace{H\Big[\tfrac{1}{N}\sum_i p(y \mid x_i)\Big]}_{\text{marginal, maximize}} \;-\; \underbrace{\tfrac{1}{N}\sum_i H[p(y \mid x_i)]}_{\text{conditional, minimize}} $$
+- [ ] Down-weighting multiplies only the conditional-entropy term.
+- [ ] Same seeds/data/optimizer/schedule across all arms — only the objective
+  changes:
+  - (a) no adaptation (reuse frozen-model numbers from §4/§8)
+  - (b) entropy only — expect collapse; watch the predicted class histogram
+  - (c) full IM, no weighting = SHOT-IM
+  - (d) IM + weight from MAP predictive entropy (no Bayes) — the crucial control;
+    without this arm there's no evidence the gain (if any) comes from epistemic
+    uncertainty specifically rather than re-weighting per se
+  - (e) IM + weight from Laplace predictive entropy = paper-faithful U-SFAN
+  - (f) IM + weight from standardized BALD epistemic component — a deviation from
+    the paper (which uses total predictive entropy), label it as such
+- [ ] Given a class imbalance in the source data (§2), consider whether L_div's
+  push toward a uniform batch marginal is appropriate here, or whether a
+  source-estimated class prior should replace it — report the vanilla version too
+  as a confounder either way.
+- [ ] With only 11 target domains, think about whether a per-shift-tercile
+  breakdown is statistically meaningful at this sample size, or whether a
+  continuous regression (accuracy/ECE vs. shift proxy) is more honest than binning.
+- [ ] Log trajectories per arm (target accuracy, ECE, marginal entropy, predicted
+  class histogram); reliability diagrams post-adaptation, all arms; multiple seeds,
+  mean ± std.
+
+**Check:** does (b) collapse while (c) doesn't? Does (e) beat (d)? Does (e) or (f)
+beat (c), especially on the more-shifted target subjects? If not, suspects in
+order: weighting scale/normalization, γ balance, adaptation LR/schedule, or the
+L_div/imbalance interaction.
+
+---
+
+## 10. Open-set — needs a decision before starting
+
+BASAN has no postural-transition data and no per-subject etiology file is present
+in this repo, so the original (UCI HAR/HAPT-based) open-set plan does not port over.
+Options, in order of preference:
+
+- [ ] Check whether per-subject etiology (which of the 11 ABNORMAL subjects has
+  ACL vs. meniscus vs. sciatic nerve injury) can be recovered from the original
+  dataset documentation or associated publications. If yes, this is the most
+  clinically meaningful open-set structure: train source excluding one etiology,
+  treat it as target-private.
+- [ ] If etiology can't be recovered, consider dropping open-set entirely and
+  noting it as future work requiring that metadata.
+- [ ] Leave-one-exercise-out as a last-resort substitute (train on 2 of 3
+  exercises, treat the 3rd as target-private) — flag clearly that this conflates a
+  label-space shift with the healthy/pathological shift, so it's a weaker and less
+  clean setting than the other two options.
+
+---
+
+## 11. Report & presentation
+
+- [ ] Anchor explicitly to course notes: §7.3 (Laplace approximation, and its
+  local/unimodal caveats), §7.4 (Bayesian logistic regression — the last-layer LA
+  *is* this, with learned features), §2.3 (entropy/KL/mutual information — both the
+  IM loss and BALD live here), §10.6 (Bayesian NNs, predictive as model averaging),
+  ch. 8 (sampling, used as MCMC ground truth for the Laplace validation).
+- [ ] Slide on why last-layer-only: tractability + the textbook-equivalence
+  argument.
+- [ ] Limitations section, to include at minimum:
+  - Posterior staleness (q(θ) fixed at β_MAP while β moves during adaptation).
+  - LA is local and unimodal — no guarantee about the rest of the posterior.
+  - Any deviation from the paper (e.g. arm (f) in §9).
+  - Dataset-specific limitations: single joint (knee), fixed EMG electrode
+    placement that may not match a given exoskeleton's sensors, subject sex/age
+    coverage limited to whatever BASAN actually documents, the ABNORMAL population's
+    etiologies may not represent the population a real assistive device would see,
+    offline windowed classification rather than causal real-time, no cost asymmetry
+    between confusion types, small number of target domains (11) limiting the
+    statistical power of any shift-vs-uncertainty correlation.
+  - Whichever open-set option was taken in §10, and why.
+- [ ] State the model-selection protocol (no target labels used, ever) as one
+  explicit sentence.
+
+---
+
+## 12. Eventually / stretch
+
+- [ ] Full-network KFAC vs. last-layer-only.
+- [ ] MC dropout / small deep ensemble comparison against the Laplace approach —
+  check empirically which of the paper's stated advantages of LA over MC dropout
+  actually hold in this setting.
+- [ ] Since raw EMG is available (unlike UCI HAR's pre-engineered features), a
+  learned feature extractor (e.g. small 1D-conv over raw windows) instead of the
+  hand-engineered Hudgins set is a natural extension — worth comparing whether a
+  learned representation changes the strength of any shift-vs-uncertainty
+  correlation found in §8.
+- [ ] Cost-sensitive rejection reflecting that not all confusions are equally
+  costly in a clinical/assistive setting.
