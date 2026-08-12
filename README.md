@@ -1,82 +1,44 @@
 # BayesianExoAdaptation
 
-The project tests one causal chain, and every experiment described in `TODO.md` exists
-to validate a specific link in it:
+Source-free domain adaptation with last-layer Laplace uncertainty, applied to
+locomotion-mode recognition. Replicates and extends Roy et al., *Uncertainty-guided
+Source-free Domain Adaptation* (U-SFAN, `paper/U-SFAN.pdf`).
 
-1. A neural network trained to MAP on source data only becomes overconfident under
-   domain shift (calibration breaks on target data). This is a known failure mode of
-   deep learning models, particularly problematic in safety-critical, assistive
-   contexts where a system needs to know when it doesn't know.
-2. A post-hoc Bayesian treatment of the last layer (Laplace approximation) yields a
-   predictive epistemic variance that should grow systematically as samples move
-   farther from the source distribution — i.e. variance as a shift detector.
-3. That same variance signal can drive adaptation: down-weighting high-uncertainty
-   samples during entropy-based adaptation (following the U-SFAN paper, see
-   `paper/U-SFAN.pdf`) should let the optimization be steered mainly by reliable
-   target samples, rather than being misled by confident-but-wrong predictions on
-   heavily shifted data.
+Pipeline: MAP-train a source classifier -> fit a last-layer Laplace posterior ->use
+the resulting epistemic uncertainty (BALD) to down-weight unreliable target samples
+during information-maximization adaptation.
 
-The original framing for this project targeted power-assist lower-limb exoskeletons,
-using a source-free domain adaptation setup: adapt a controller pre-trained on a pool
-of subjects (source domain) to a new, unseen subject (target domain) without access to
-the original source data.
+## Dataset
 
-## A note on the dataset pivot
+**UCI HAR** (Human Activity Recognition Using Smartphones): 30 subjects, waist-mounted
+smartphone, 561 pre-engineered accelerometer/gyroscope features per 2.56s window.
 
-An earlier version of this project used a lower-limb sEMG dataset (BASAN, 22 subjects —
-11 healthy, 11 with diagnosed knee pathologies), which offered a stronger version of
-the exoskeleton framing: a real healthy-vs-pathological population shift, rather than a
-surrogate. That dataset was set aside after raw-signal data-quality issues (inconsistent
-file headers, per-channel sample-count mismatches, unexplained EMG amplitude outliers,
-inconsistent goniometer sign conventions, and highly uneven recording durations across
-subjects) turned out to demand disproportionate data-engineering effort relative to
-their relevance for a course project centered on approximate Bayesian inference rather
-than biomedical signal processing.
+- Main task: 3-class locomotion (`WALKING`, `WALKING_UPSTAIRS`, `WALKING_DOWNSTAIRS`).
+  Secondary: full 6-class setting for comparison.
+- Domain shift: inter-subject variability. Original train/test split discarded;
+  project builds its own subject-wise source pool + per-subject target domains.
+- Open-set extension planned via HAPT (postural transitions as OOD classes).
+- Data not included in this repo — download from the
+  [UCI ML Repository](https://archive.ics.uci.edu/dataset/240/human+activity+recognition+using+smartphones),
+  see `TODO.md` §0 for file layout and format notes.
 
-The project now uses **UCI HAR** instead — pre-engineered features, well-documented,
-no comparable data-quality issues found on inspection. The trade-off is an explicit
-one: a weaker version of the exoskeleton motivation (healthy subjects performing
-different locomotion modes, rather than a real pathological population), in exchange
-for a dataset that lets the project's actual focus — the Bayesian machinery — get most
-of the attention. This trade-off, and the reasoning behind it, is documented as part of
-the project's own limitations rather than left implicit.
+An earlier version used a lower-limb sEMG dataset (BASAN); set aside due to raw-signal
+data-quality issues unrelated to the project's actual focus. See `TODO.md` for details.
 
-## Dataset: UCI HAR (Human Activity Recognition Using Smartphones)
+## Sanity checks
 
-### Overview
+A synthetic 2D toy (replicating the paper's Fig. 4) and an MNIST vs Fashion-MNIST /
+Rotated-MNIST check (replicating Kristiadi, Hein & Hennig, ICML 2020 — ref. [26] in
+the U-SFAN paper) validate the Laplace/BALD implementation on unambiguous shifts
+before applying it to UCI HAR's subtler inter-subject shift.
 
-Recordings from **30 subjects**, each wearing a waist-mounted smartphone, performing
-six activities. The dataset ships 561 pre-engineered features per 2.56s window
-(time- and frequency-domain statistics of accelerometer/gyroscope signals), already
-computed — no raw-signal processing is needed for the main pipeline.
+## Course context
 
-### Activities
+Developed for the Probabilistic Machine Learning course (University of Trieste,
+`PML_notes_full.pdf`). Theoretical basis: Laplace approximation (§7.3), Bayesian
+logistic regression (§7.4), entropy/mutual information (§2.3), Bayesian model
+averaging (§10.6).
 
-| Label | Activity | Used in main task? |
-|---|---|---|
-| 1 | WALKING | yes |
-| 2 | WALKING_UPSTAIRS | yes |
-| 3 | WALKING_DOWNSTAIRS | yes |
-| 4 | SITTING | secondary/6-class setting only |
-| 5 | STANDING | secondary/6-class setting only |
-| 6 | LAYING | secondary/6-class setting only |
+## Status
 
-The main task is restricted to the three locomotion classes (1-3): this is the actual
-intent-recognition problem relevant to a mobility-assistance framing, and it avoids the
-near-ceiling accuracy (~96%+) typically reported when all six classes are included,
-which would leave little room to demonstrate an uncertainty/adaptation effect.
-
-### Domain shift
-
-There is no healthy-vs-pathological split in this dataset, all 30 subjects are healthy. Domain shift here is **inter-subject
-variability**: the project builds its own subject-wise source/target partition (a
-fixed source pool vs. each remaining subject as a separate target domain), discarding
-the dataset's original train/test split, which was not designed around this axis.
-
-### File organization
-
-The raw data is the official UCI HAR
-zip, containing pre-engineered features (`X_*.txt`, `y_*.txt`, `subject_*.txt` under
-`train/` and `test/`) plus raw inertial signals (`Inertial Signals/`, not used by the
-main pipeline, kept aside for a possible learned-features extension). See `TODO.md`
-§0 for the exact file layout and format quirks (whitespace-separated columns, etc.).
+No code implemented yet — see `TODO.md` for the current plan and task list.
