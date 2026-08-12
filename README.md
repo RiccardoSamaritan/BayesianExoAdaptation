@@ -1,50 +1,82 @@
 # BayesianExoAdaptation
 
-The whole project tests one causal chain, and every experiment below exists to validate a specific link in it:
+The project tests one causal chain, and every experiment described in `TODO.md` exists
+to validate a specific link in it:
 
-1. A neural network trained to MAP on source data only becomes overconfident under domain shift (calibration breaks on target data). This is a known failure mode of deep learning models, and it is particularly problematic in safety-critical applications like assistive robotics.
-2. A post-hoc Bayesian treatment (Kronecker-Factored Laplace Approximation, KFLA) yields a predictive epistemic variance that grows systematically as samples move farther from the source distribution (variance acts as a shift detector).
-3. That same variance signal can drive adaptation: down-weighting high-uncertainty samples during entropy-based adaptation lets the optimization be steered mainly by reliable target samples.
+1. A neural network trained to MAP on source data only becomes overconfident under
+   domain shift (calibration breaks on target data). This is a known failure mode of
+   deep learning models, particularly problematic in safety-critical, assistive
+   contexts where a system needs to know when it doesn't know.
+2. A post-hoc Bayesian treatment of the last layer (Laplace approximation) yields a
+   predictive epistemic variance that should grow systematically as samples move
+   farther from the source distribution — i.e. variance as a shift detector.
+3. That same variance signal can drive adaptation: down-weighting high-uncertainty
+   samples during entropy-based adaptation (following the U-SFAN paper, see
+   `paper/U-SFAN.pdf`) should let the optimization be steered mainly by reliable
+   target samples, rather than being misled by confident-but-wrong predictions on
+   heavily shifted data.
 
-We want to apply Source-Free Domain Adaptation (SFDA) in assistive robotics, specifically for power-assist exoskeletons. The goal is to adapt a myoelectric (EMG) controller, pre-trained on a pool of healthy subjects (Source Domain), to a new, unseen patient (Target Domain) without accessing the original training data.
+The original framing for this project targeted power-assist lower-limb exoskeletons,
+using a source-free domain adaptation setup: adapt a controller pre-trained on a pool
+of subjects (source domain) to a new, unseen subject (target domain) without access to
+the original source data.
 
-## Dataset: Lower Limb Surface Electromyography (sEMG)
+## A note on the dataset pivot
+
+An earlier version of this project used a lower-limb sEMG dataset (BASAN, 22 subjects —
+11 healthy, 11 with diagnosed knee pathologies), which offered a stronger version of
+the exoskeleton framing: a real healthy-vs-pathological population shift, rather than a
+surrogate. That dataset was set aside after raw-signal data-quality issues (inconsistent
+file headers, per-channel sample-count mismatches, unexplained EMG amplitude outliers,
+inconsistent goniometer sign conventions, and highly uneven recording durations across
+subjects) turned out to demand disproportionate data-engineering effort relative to
+their relevance for a course project centered on approximate Bayesian inference rather
+than biomedical signal processing.
+
+The project now uses **UCI HAR** instead — pre-engineered features, well-documented,
+no comparable data-quality issues found on inspection. The trade-off is an explicit
+one: a weaker version of the exoskeleton motivation (healthy subjects performing
+different locomotion modes, rather than a real pathological population), in exchange
+for a dataset that lets the project's actual focus — the Bayesian machinery — get most
+of the attention. This trade-off, and the reasoning behind it, is documented as part of
+the project's own limitations rather than left implicit.
+
+## Dataset: UCI HAR (Human Activity Recognition Using Smartphones)
 
 ### Overview
-This project uses a surface electromyography (sEMG) database designed for lower limb analysis. The dataset contains recordings from **22 male subjects**: 11 with previously diagnosed knee abnormalities and 11 healthy controls.
 
-### Acquisition Protocol
-Each subject performed **3 exercises** to analyze muscular behavior related to knee movement:
-1. **March** - Walking motion
-2. **Leg Extension** - Extension from seated position
-3. **Knee Flexion** - Flexion while standing
+Recordings from **30 subjects**, each wearing a waist-mounted smartphone, performing
+six activities. The dataset ships 561 pre-engineered features per 2.56s window
+(time- and frequency-domain statistics of accelerometer/gyroscope signals), already
+computed — no raw-signal processing is needed for the main pipeline.
 
-Each exercise set contains 3-5 repetitions.
+### Activities
 
-### Electrode Placement
-Four electrodes were placed on the following muscles of the leg:
+| Label | Activity | Used in main task? |
+|---|---|---|
+| 1 | WALKING | yes |
+| 2 | WALKING_UPSTAIRS | yes |
+| 3 | WALKING_DOWNSTAIRS | yes |
+| 4 | SITTING | secondary/6-class setting only |
+| 5 | STANDING | secondary/6-class setting only |
+| 6 | LAYING | secondary/6-class setting only |
 
-| Channel | Muscle | Abbreviation | Column Index |
-|---------|--------|--------------|--------------|
-| Ch1 | Rectus Femoris | RF | 0 |
-| Ch2 | Biceps Femoris | BF | 1 |
-| Ch3 | Vastus Medialis (Internus) | VM | 2 |
-| Ch4 | Semitendinosus | ST | 3 |
-| Ch5 | Knee Flexion Angle | FX | 4 |
+The main task is restricted to the three locomotion classes (1-3): this is the actual
+intent-recognition problem relevant to a mobility-assistance framing, and it avoids the
+near-ceiling accuracy (~96%+) typically reported when all six classes are included,
+which would leave little room to demonstrate an uncertainty/adaptation effect.
 
-### Data Format
-Each file contains 5 columns with the following specifications:
+### Domain shift
 
-| Channel | Description | Units | Sample Count |
-|---------|-------------|-------|--------------|
-| RF, BF, VM, ST | EMG signals | mV | ~15,300 values |
-| FX | Knee flexion angle | degrees | ~765 values (extrapolated from 50 to 1000 Hz) |
+There is no healthy-vs-pathological split in this dataset, all 30 subjects are healthy. Domain shift here is **inter-subject
+variability**: the project builds its own subject-wise source/target partition (a
+fixed source pool vs. each remaining subject as a separate target domain), discarding
+the dataset's original train/test split, which was not designed around this axis.
 
-### File Organization
-The dataset is organized into 2 folders:
-- `A_TXT` - Abnormal subjects, .txt format
-- `N_TXT` - Normal subjects, .txt format
+### File organization
 
-### Classes
-- **Normal (N)**: 11 healthy subjects
-- **Abnormal (A)**: 11 subjects with knee pathologies
+The raw data is the official UCI HAR
+zip, containing pre-engineered features (`X_*.txt`, `y_*.txt`, `subject_*.txt` under
+`train/` and `test/`) plus raw inertial signals (`Inertial Signals/`, not used by the
+main pipeline, kept aside for a possible learned-features extension). See `TODO.md`
+§0 for the exact file layout and format quirks (whitespace-separated columns, etc.).
