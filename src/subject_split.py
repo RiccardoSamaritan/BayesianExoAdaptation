@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from loader import HARDataset
+from .loader import HARDataset
 
 
 @dataclass
