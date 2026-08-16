@@ -66,16 +66,16 @@
 
 ## 2. Data pipeline
 
-- [ ] Parser for `X_*/y_*/subject_*.txt`, whitespace-aware.
-- [ ] Check NaNs / value range.
-- [ ] Merge train+test into one pool.
-- [ ] Map labels via `activity_labels.txt`; 3-class and 6-class loader paths.
-- [ ] Class balance check (global and within chosen source pool).
-- [ ] Subject-wise source/target partition.
-- [ ] Shift proxy per target subject.
-- [ ] PCA sanity check: per-subject centroids, source-vs-target scatter,
+- [x] Parser for `X_*/y_*/subject_*.txt`, whitespace-aware.
+- [x] Check NaNs / value range.
+- [x] Merge train+test into one pool.
+- [x] Map labels via `activity_labels.txt`; 3-class and 6-class loader paths.
+- [x] Class balance check (global and within chosen source pool).
+- [x] Subject-wise source/target partition.
+- [x] Shift proxy per target subject.
+- [x] PCA sanity check: per-subject centroids, source-vs-target scatter,
   near-zero-shift reference.
-- [ ] Fit scaler on source pool only.
+- [x] Fit scaler on source pool only.
 
 ---
 
