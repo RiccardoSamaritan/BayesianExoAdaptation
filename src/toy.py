@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from bayesian import FeatureClassifier
+from .bayesian import FeatureClassifier
 
 N_CLASSES = 3
 CLASS_NAMES = ["red", "green", "blue"]

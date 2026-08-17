@@ -19,7 +19,7 @@ Laplace posterior) stays frozen throughout, per the paper's Sec. 3
 import torch
 import torch.nn.functional as F
 
-from bayesian import FeatureClassifier, LastLayerLaplace, entropy
+from .bayesian import FeatureClassifier, LastLayerLaplace, entropy
 
 
 def im_loss(logits: torch.Tensor, weights: torch.Tensor = None, gamma: float = 0.5):
