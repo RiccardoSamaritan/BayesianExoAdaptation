@@ -114,9 +114,9 @@
 
 ## 4. Source MAP training
 
-- [ ] `561 → 128 → 64 → 3` MLP, subject-wise train/val split, CE + weight decay.
-- [ ] Track macro-recall and raw accuracy on source val.
-- [ ] Evaluate per target subject; check accuracy range (no saturation, no
+- [x] `561 → 128 → 64 → 3` MLP, subject-wise train/val split, CE + weight decay.
+- [x] Track macro-recall and raw accuracy on source val.
+- [x] Evaluate per target subject; check accuracy range (no saturation, no
   near-chance collapse).
 
 ---
