@@ -81,9 +81,9 @@
 
 ## 3. Synthetic track
 
-- [ ] 2D, 3-class toy replicating paper Fig. 4 (mild vs strong shift, decision surfaces by certainty, epistemic/aleatoric maps).
-- [ ] Semantic check: far-from-source point → epistemic-dominant; near-boundary in-distribution point → aleatoric-dominant.
-- [ ] Optional: `make_classification()` sweep with ground-truth shift magnitude.
+- [x] 2D, 3-class toy replicating paper Fig. 4 (mild vs strong shift, decision surfaces by certainty, epistemic/aleatoric maps).
+- [x] Semantic check: far-from-source point → epistemic-dominant; near-boundary in-distribution point → aleatoric-dominant.
+- [x] Optional: `make_classification()` sweep with ground-truth shift magnitude.
 
 ---
 
