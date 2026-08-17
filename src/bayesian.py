@@ -92,12 +92,13 @@ class LastLayerLaplace:
 
             theta_map = W_aug.reshape(-1)
             cov = torch.linalg.inv(H)
+            # Symmetrize to fix numerical errors from inversion
+            cov = 0.5 * (cov + cov.T)
         return LastLayerLaplace(theta_map=theta_map, cov=cov, K=K, Dp=Dp)
 
     def sample_heads(self, M: int, generator: torch.Generator = None) -> torch.Tensor:
         """M samples of the flattened head params ~ N(theta_map, cov), (M, K*Dp)."""
-        cov_sym = 0.5 * (self.cov + self.cov.T)
-        L = torch.linalg.cholesky(cov_sym)
+        L = torch.linalg.cholesky(self.cov)
         eps = torch.randn(M, self.K * self.Dp, generator=generator, dtype=self.cov.dtype)
         return self.theta_map.unsqueeze(0) + eps @ L.T
 
