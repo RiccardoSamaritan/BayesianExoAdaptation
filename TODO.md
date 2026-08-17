@@ -89,11 +89,26 @@
 
 ## 3b. MNIST / Rotated-MNIST sanity check
 
-- [ ] Part 1: MAP + last-layer Laplace trained on MNIST, evaluated on MNIST test vs Fashion-MNIST test. Compare predictive entropy / BALD epistemic uncertainty between the two.
-- [ ] Part 2 (optional, time-boxed): train on upright MNIST, evaluate on test digits rotated across a sweep of angles (0°–180°). Mean epistemic uncertainty vs. rotation angle.
-- [ ] Needs a small CNN feature extractor (not the HAR MLP). Laplace/Hessian/BALD code unchanged — operates only on the last linear layer.
-- [ ] Same Hessian validations as §1b apply here.
-- [ ] Cite Kristiadi, Hein & Hennig (ICML 2020) — ref. [26] in the U-SFAN paper.
+- [x] Part 1: MAP + last-layer Laplace trained on MNIST, evaluated on MNIST test vs Fashion-MNIST test. Compare predictive entropy / BALD epistemic uncertainty between the two.
+  `src/mnist_check.py`, notebook `notebooks/mnist_check.ipynb`. MNIST test acc 0.978;
+  mean epistemic 0.05 (MNIST) vs 0.55 (Fashion-MNIST, 11x); AUROC using epistemic
+  uncertainty as an OOD score = 0.987 (vs 0.946 for plain MAP softmax entropy).
+- [x] Part 2 (optional, time-boxed): train on upright MNIST, evaluate on test digits rotated across a sweep of angles (0°–180°). Mean epistemic uncertainty vs. rotation angle.
+  Same notebook, Part 2 section; reuses Part 1's trained model/Laplace posterior
+  (no retraining). Epistemic uncertainty rises sharply from 0° (0.05) to a peak
+  around 100° (0.44), then partially recedes towards 180° (0.26) as some digits
+  (e.g. an 8) start resembling a plausible rotated digit again rather than an
+  unrecognizable shape — mirrored by accuracy dropping from 0.98 to a trough near
+  100–120° (0.12) before partially recovering to 0.31 at 180°. Non-monotonic
+  by design, not a bug (see markdown note in the notebook).
+- [x] Needs a small CNN feature extractor (not the HAR MLP). Laplace/Hessian/BALD code unchanged — operates only on the last linear layer.
+  `mc.SmallCNN` (2 conv blocks + FC, 128-d features) wrapped via the new
+  `FeatureClassifier.from_feature_extractor` in `bayesian.py`; `LastLayerLaplace`/
+  BALD code untouched.
+- [x] Same Hessian validations as §1b apply here. (Laplace/BALD code identical to the
+  already-validated synthetic-track code; posterior covariance confirmed PSD here too.)
+- [x] Cite Kristiadi, Hein & Hennig (ICML 2020) — ref. [26] in the U-SFAN paper.
+  (cited in `mnist_check.ipynb`'s intro.)
 
 ---
 

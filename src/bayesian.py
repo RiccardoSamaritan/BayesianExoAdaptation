@@ -21,8 +21,13 @@ import torch.nn.functional as F
 
 
 class FeatureClassifier(nn.Module):
-    """f = h o g. `g` is an MLP feature extractor (params beta), `h` is the
-    linear head (params theta) that gets the Bayesian treatment."""
+    """f = h o g. `g` is a feature extractor (params beta), `h` is the linear
+    head (params theta) that gets the Bayesian treatment. The default
+    constructor builds a plain MLP `g` (used by the synthetic toy and, later,
+    the HAR MLP); `from_feature_extractor` wraps an arbitrary `g` (e.g. a CNN
+    for MNIST, TODO.md Sec. 3b) -- the Laplace/BALD code below only ever
+    calls `.features()` and reads `.h.weight`/`.h.bias`, so it is unchanged
+    either way."""
 
     def __init__(self, in_dim: int, hidden_dims: list, n_classes: int):
         super().__init__()
@@ -33,6 +38,14 @@ class FeatureClassifier(nn.Module):
             d = hd
         self.g = nn.Sequential(*layers)
         self.h = nn.Linear(d, n_classes)
+
+    @classmethod
+    def from_feature_extractor(cls, g: nn.Module, feature_dim: int, n_classes: int) -> "FeatureClassifier":
+        obj = cls.__new__(cls)
+        nn.Module.__init__(obj)
+        obj.g = g
+        obj.h = nn.Linear(feature_dim, n_classes)
+        return obj
 
     def features(self, x: torch.Tensor) -> torch.Tensor:
         return self.g(x)

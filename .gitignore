@@ -1,3 +1,7 @@
+# torchvision dataset caches (downloaded on demand, large binaries)
+data/MNIST/
+data/FashionMNIST/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
