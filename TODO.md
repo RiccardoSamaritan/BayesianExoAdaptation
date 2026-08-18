@@ -143,11 +143,31 @@
 
 ## 7. Uncertainty decomposition
 
-- [ ] BALD epistemic/aleatoric split, tested against MCMC (§5).
-- [ ] Semantic checks: SITTING vs STANDING (6-class setting) → aleatoric-dominant;
+- [x] BALD epistemic/aleatoric split, tested against MCMC (§5).
+  `notebooks/har_uncertainty_decomposition.ipynb`. Reuses the §5 artifact
+  (`data/har_bald_artifact.npz`, M_FIXED=5000) and cites §5's MCMC validation
+  (`test_laplace_vs_mcmc.ipynb`: Pearson corr. vs. MCMC = 0.94 total, 0.72
+  epistemic, 0.95 aleatoric) rather than re-running MCMC on the real 195-dim
+  HAR head.
+- [x] Semantic checks: SITTING vs STANDING (6-class setting) → aleatoric-dominant;
   hardest target subject → epistemic-dominant.
-- [ ] Absolute normalization of epistemic signal.
-- [ ] Check effect of τ on epistemic/aleatoric balance.
+  Same notebook. Hardest target (subject 20, acc=0.653) has both the lowest
+  accuracy and the highest epistemic uncertainty of the cohort (8.9x the
+  source-val reference). A separate 6-class model (SITTING/STANDING aren't in
+  the 3-class locomotion task) shows SITTING+STANDING aleatoric elevated 5.7x
+  over clearly-separable classes vs. only 2.5x for epistemic -- confusion
+  there is driven by aleatoric, not epistemic, uncertainty.
+- [x] Absolute normalization of epistemic signal.
+  `normalize_epistemic()` added to `src/bayesian.py` (`log_k` and
+  `source_quantile` modes, both computed from fixed references, never
+  per-batch). Source-quantile z-score separates easy targets (z~0-2) from
+  hard ones (z>20) on one fixed scale.
+- [x] Check effect of τ on epistemic/aleatoric balance.
+  Same notebook, §6. τ = `LastLayerLaplace.predictive`'s `temperature`
+  (the same τ=0.4 fixed in §1) -- swept 0.1 to 4.0: epistemic fraction falls
+  monotonically from ~0.76-0.87 (source/hardest target) at τ=0.1 to ~0.02-0.03
+  at τ=4.0. The fixed τ=0.4 keeps epistemic near half the signal for the
+  hardest target (vs. only 23% at the untouched τ=1 default).
 
 ---
 

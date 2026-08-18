@@ -123,6 +123,31 @@ class LastLayerLaplace:
                     aleatoric=aleatoric, epistemic=epistemic)
 
 
+def normalize_epistemic(epistemic: torch.Tensor, mode: str = "log_k", K: int = None,
+                         source_median: float = None, source_iqr: float = None) -> torch.Tensor:
+    """Put epistemic uncertainty on an absolute scale so values are comparable
+    across subjects/datasets (TODO.md Sec. 1b: "never per-batch" -- the
+    reference stats below are fixed constants, not derived from whatever
+    batch is being normalized).
+
+    mode="log_k": divide by log(K), the theoretical max entropy -- a
+    data-independent scale.
+    mode="source_quantile": robust z-score against the source set's own
+    epistemic distribution (median/IQR), which must be precomputed once from
+    source data and passed in via `source_median`/`source_iqr`."""
+    if mode == "log_k":
+        if K is None:
+            raise ValueError("mode='log_k' requires K")
+        return epistemic / torch.log(torch.tensor(float(K)))
+    elif mode == "source_quantile":
+        if source_median is None or source_iqr is None:
+            raise ValueError("mode='source_quantile' requires source_median and source_iqr "
+                              "precomputed once from source data")
+        return (epistemic - source_median) / source_iqr
+    else:
+        raise ValueError(f"unknown mode {mode!r}")
+
+
 def map_entropy(model: FeatureClassifier, X: torch.Tensor) -> torch.Tensor:
     """Predictive entropy of the plain point-estimate (MAP) softmax --
     used for the 'MAP (conventional)' row and the Ent.-weighting ablation."""
