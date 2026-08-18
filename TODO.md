@@ -123,11 +123,11 @@
 
 ## 5. Exact last-layer Laplace
 
-- [ ] Exact GGN Hessian: $H = \sum_n \Lambda_n \otimes \phi_n\phi_n^T + \tau I$,
+- [x] Exact GGN Hessian: $H = \sum_n \Lambda_n \otimes \phi_n\phi_n^T + \tau I$,
   $\Lambda_n = \mathrm{diag}(p_n) - p_n p_n^T$.
-- [ ] Validation 1: K=2 reduction vs. notes §7.4.
-- [ ] Validation 2: vs. Metropolis-Hastings/HMC on a small synthetic problem.
-- [ ] MC predictive + BALD, with a convergence check on number of MC samples.
+- [x] Validation 1: K=2 reduction vs. notes §7.4.
+- [x] Validation 2: vs. Metropolis-Hastings/HMC on a small synthetic problem.
+- [x] MC predictive + BALD, with a convergence check on number of MC samples.
 
 ---
 
