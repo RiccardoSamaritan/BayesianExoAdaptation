@@ -15,11 +15,22 @@ recomputed every step from the *current* (adapting) features, per TODO.md
 Sec. 1. The feature extractor beta is updated; the head theta (MAP or
 Laplace posterior) stays frozen throughout, per the paper's Sec. 3
 ("Problem Definition") and Fig. 3b.
+
+TODO.md Sec. 9 additionally asks for two more weight modes, both still
+recomputed every step from current features, frozen head:
+"map_entropy" -- w_i = exp(-H_i) with H_i the plain MAP softmax entropy of
+the *adapting* model itself (no Bayesian treatment at all -- the
+conventional, non-Laplace uncertainty signal, arm (d) of the ablation).
+"epistemic_standardized" -- w_i = exp(-z_i) with z_i the BALD epistemic
+term standardized against a *fixed* source-validation reference
+(median/IQR, `normalize_epistemic(mode="source_quantile")`, TODO.md Sec. 1b:
+never per-batch) -- an explicit deviation from the paper (which weights by
+total predictive entropy, not epistemic alone), arm (f).
 """
 import torch
 import torch.nn.functional as F
 
-from .bayesian import FeatureClassifier, LastLayerLaplace, entropy
+from .bayesian import FeatureClassifier, LastLayerLaplace, entropy, map_entropy, normalize_epistemic
 
 
 def im_loss(logits: torch.Tensor, weights: torch.Tensor = None, gamma: float = 0.5):
@@ -39,10 +50,15 @@ def im_loss(logits: torch.Tensor, weights: torch.Tensor = None, gamma: float = 0
 
 def adapt_target(model: FeatureClassifier, laplace: LastLayerLaplace, X_target: torch.Tensor,
                   weight_mode: str = "uncertainty", gamma: float = 0.5, temperature: float = 0.4,
-                  lr: float = 1e-2, steps: int = 300, M: int = 100, seed: int = 0) -> dict:
+                  lr: float = 1e-2, steps: int = 300, M: int = 100, seed: int = 0,
+                  source_epi_median: float = None, source_epi_iqr: float = None) -> dict:
     """Adapts model.g in place on unlabeled X_target via (weighted) IM loss.
-    model.h stays frozen. Returns the loss trajectory for diagnostics."""
-    assert weight_mode in ("none", "uncertainty")
+    model.h stays frozen. Returns the loss trajectory for diagnostics.
+    `source_epi_median`/`source_epi_iqr` are required only for
+    weight_mode="epistemic_standardized" (TODO.md Sec. 9, arm f) -- precompute
+    once from the source validation set's own epistemic distribution and pass
+    in, never derive from `X_target` itself."""
+    assert weight_mode in ("none", "uncertainty", "map_entropy", "epistemic_standardized")
     torch.manual_seed(seed)
     for p in model.h.parameters():
         p.requires_grad_(False)
@@ -56,6 +72,18 @@ def adapt_target(model: FeatureClassifier, laplace: LastLayerLaplace, X_target: 
             with torch.no_grad():
                 pred = laplace.predictive(model, X_target, M=M)
                 weights = torch.exp(-pred["total_entropy"])
+        elif weight_mode == "map_entropy":
+            with torch.no_grad():
+                weights = torch.exp(-map_entropy(model, X_target))
+        elif weight_mode == "epistemic_standardized":
+            if source_epi_median is None or source_epi_iqr is None:
+                raise ValueError("weight_mode='epistemic_standardized' requires "
+                                  "source_epi_median/source_epi_iqr precomputed from source data")
+            with torch.no_grad():
+                pred = laplace.predictive(model, X_target, M=M)
+                z = normalize_epistemic(pred["epistemic"], mode="source_quantile",
+                                         source_median=source_epi_median, source_iqr=source_epi_iqr)
+                weights = torch.exp(-z)
         else:
             weights = None
         loss, ent, div = im_loss(logits, weights=weights, gamma=gamma)

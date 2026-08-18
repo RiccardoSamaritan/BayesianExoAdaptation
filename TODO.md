@@ -205,17 +205,43 @@
 
 ## 9. Adaptation + ablation
 
-- [ ] IM loss:
+- [x] IM loss:
   $$ \mathcal{L}_{\text{IM}} = H\Big[\tfrac{1}{N}\sum_i p(y|x_i)\Big] - \tfrac{1}{N}\sum_i H[p(y|x_i)] $$
-- [ ] 6 arms, same seeds/data/optimizer, only the objective changes:
+  `src/im_adapt.py` (pre-existing). Down-weighting confirmed restricted to
+  the conditional-entropy term only, never `L_div`.
+- [x] 6 arms, same seeds/data/optimizer, only the objective changes:
   - (a) no adaptation
   - (b) entropy only (expect collapse)
   - (c) IM, no weighting (SHOT-IM)
   - (d) IM + MAP predictive entropy weight
   - (e) IM + Laplace predictive entropy weight (paper-faithful)
   - (f) IM + standardized BALD epistemic weight (deviation, label as such)
-- [ ] Per-shift-tercile or continuous regression breakdown.
-- [ ] Log per-arm trajectories, reliability diagrams, multi-seed mean ± std.
+
+  `notebooks/har_adaptation_ablation.ipynb`. Extended `adapt_target()` with
+  two new `weight_mode`s (`map_entropy`, `epistemic_standardized`) for (d)/(f);
+  (a)/(b)/(c)/(e) reuse existing code paths unchanged (`weight_mode=None`/
+  `"none"`/`"uncertainty"`, `gamma=0`/`0.5`). 5 seeds x 10 targets. (b)
+  fully collapses (>90% one class) on 34% of runs (NLL ~13.4); (c) avoids
+  full collapse but barely helps; (d)/(e) are the only arms that ever beat
+  baseline, (e) best; (f) stays negative even where (d)/(e) win and shows
+  visibly noisier per-step weights -- the expected deviation. Caveat found
+  on review: a *partial*-collapse metric (any class getting zero
+  predictions, distinct from the >90%-one-class check) fires on 14-30% of
+  runs across (c)-(f) (not just (f)) -- entropy minimization with a frozen
+  head can zero out a class on any weighted arm; (e)'s 24% is a real caveat
+  on its otherwise-best numbers.
+- [x] Per-shift-tercile or continuous regression breakdown.
+  Same notebook, §7. Macro-averaged over all 10 targets every adaptation arm
+  looks worse than doing nothing (6/10 targets are already >=94% accurate,
+  nothing to gain) -- but split into shift terciles, (d)/(e) turn positive
+  specifically on the 4 genuinely-hard subjects (high tercile: +0.03/+0.06),
+  while every arm loses ground on the easy 6. The macro-average alone is
+  misleading; the tercile view is what actually validates the method.
+- [x] Log per-arm trajectories, reliability diagrams, multi-seed mean ± std.
+  Same notebook, §5-§6. Trajectories logged for the highest-shift subject
+  (loss/entropy-term/diversity-term/mean-weight, mean±std over 5 seeds);
+  reliability diagrams compare all 6 arms pooled; every headline number is a
+  5-seed mean ± std (§4).
 
 ---
 
