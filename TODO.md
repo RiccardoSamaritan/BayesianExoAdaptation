@@ -131,7 +131,7 @@
 
 ---
 
-## 6. KFAC
+## 6. KFAC - NON LA FACCIAMO !!!!!
 
 - [ ] Implement Kronecker-factored approximation; state explicitly that the
   exact sum doesn't factor (independence assumption).
