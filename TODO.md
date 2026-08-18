@@ -173,13 +173,33 @@
 
 ## 8. Calibration check
 
-- [ ] Reliability diagrams, MAP vs Laplace, source + every target subject.
-- [ ] ECE, NLL, Brier — multi-seed mean ± std.
-- [ ] AUROC for misclassification detection.
-- [ ] Accuracy-vs-coverage curve.
-- [ ] Spearman(shift proxy, epistemic uncertainty), multi-seed.
-- [ ] Plots: ECE vs shift, epistemic vs shift with seed bands, reliability
+- [x] Reliability diagrams, MAP vs Laplace, source + every target subject.
+  `notebooks/har_calibration.ipynb`, §4. 5-seed model init/training (fixed
+  seed=42 source/target split, per TODO.md §1 "5 seeds minimum"), predictions
+  pooled across seeds per subject; marker size = bin count so sparse bins
+  read as noisy rather than as signal.
+- [x] ECE, NLL, Brier — multi-seed mean ± std.
+  Same notebook, §5. Laplace improves mean ECE/NLL on 7/11 subjects --
+  consistently the harder, higher-shift ones (e.g. subject 20: NLL
+  1.55 -> 1.03); negligible overcorrection on the easiest, already-
+  well-calibrated ones (source val, 15, 30).
+- [x] AUROC for misclassification detection.
+  Same notebook, §6. Epistemic alone is not uniformly the best detector --
+  it is a shift detector first (tracks difficulty, §7), a misclassification
+  detector second; total entropy / MAP entropy do comparably or better on
+  the hardest subjects where errors are mostly aleatoric.
+- [x] Accuracy-vs-coverage curve.
+  Same notebook, §7. Rejecting by Laplace total entropy recovers near-
+  source accuracy at reduced coverage even on the highest-shift target
+  (subject 19: 0.77 at full coverage -> ~1.0 at low coverage).
+- [x] Spearman(shift proxy, epistemic uncertainty), multi-seed.
+  Same notebook, §8. ρ = 0.84 ± 0.03 across 5 seeds (all p<0.01). One
+  disagreement worth noting: subject 20 has lower shift-proxy distance than
+  subject 19 but higher epistemic uncertainty and lower accuracy -- epistemic
+  tracks true difficulty better than the crude centroid-distance proxy here.
+- [x] Plots: ECE vs shift, epistemic vs shift with seed bands, reliability
   diagrams at low/mid/high shift, accuracy-vs-coverage.
+  Same notebook, §9 (+ §4/§7 for the reliability/coverage plots).
 
 ---
 
