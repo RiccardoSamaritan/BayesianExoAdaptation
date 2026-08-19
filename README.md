@@ -39,6 +39,17 @@ Developed for the Probabilistic Machine Learning course (University of Trieste,
 logistic regression (§7.4), entropy/mutual information (§2.3), Bayesian model
 averaging (§10.6).
 
+## Repository layout
+
+- `src/` — library code (data loaders, Laplace/BALD machinery, training, adaptation, calibration).
+- `notebooks/` — one notebook per pipeline stage (see `TODO.md` for the section each one covers).
+- `data/` — UCI HAR / HAPT raw data plus cached inference artifacts (not tracked in git).
+- `docs/` — extended project rationale (`project_overview_it.md`, Italian, pre-pivot).
+- `paper/` — reference paper (U-SFAN).
+
 ## Status
 
-No code implemented yet — see `TODO.md` for the current plan and task list.
+Pipeline implemented end to end (`TODO.md` §2-§10: data loading, synthetic/MNIST
+sanity checks, source MAP training, exact last-layer Laplace, uncertainty
+decomposition, calibration, adaptation ablation, open-set evaluation). Only
+the written report (§11) is outstanding.

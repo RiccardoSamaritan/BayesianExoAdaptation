@@ -1,3 +1,12 @@
+# Motivazione del progetto
+
+> Nota: questo testo descrive l'impostazione concettuale originale del progetto,
+> basata sul dataset sEMG (BASAN), poi accantonato per problemi di qualità del
+> segnale grezzo (si veda `TODO.md`). L'implementazione attuale usa **UCI HAR**
+> al posto del segnale sEMG, ma il framework bayesiano, la domanda di ricerca e
+> il piano di validazione descritti qui restano quelli guida del progetto. Per
+> lo stato dell'implementazione corrente vedi `README.md` e `TODO.md`.
+
 L'idea centrale è verificare se dotare un modello di riconoscimento del movimento di una nozione di incertezza sui propri parametri lo renda più robusto quando viene spostato dal contesto in cui è stato addestrato a uno diverso — e se questa robustezza si traduca in un vantaggio concreto quando il modello deve adattarsi al nuovo contesto senza avere etichette. Il caso di studio è la classificazione di tre esercizi (cammino, flessione del ginocchio in piedi, estensione della gamba da seduti) a partire da segnale sEMG di quattro muscoli della coscia più l'angolo del ginocchio misurato da un goniometro. Il modello viene addestrato solo su soggetti sani, e poi si osserva cosa succede quando lo si applica, senza mai riaddestrarlo con etichette, a soggetti con una patologia diagnosticata al ginocchio. È uno scenario di *source-free domain adaptation*: il sistema deve funzionare su una popolazione diversa da quella su cui è nato, avendo accesso solo ai propri dati non etichettati del nuovo dominio.
 
 Il motivo per cui questo non è solo un esercizio metodologico è che la domanda ha un peso pratico reale in un contesto assistivo: un dispositivo che debba riconoscere l'intenzione di movimento di chi lo indossa non può permettersi di essere sicuro di sé quando in realtà sta sbagliando, specialmente se l'utente ha una biomeccanica alterata rispetto a chi ha generato i dati di addestramento. Un modello che sa dire "qui sono incerto" può astenersi o chiedere conferma; un modello solo puntuale (una singola stima dei pesi, senza nozione di quanto ci si possa fidare) non ha questa possibilità e tende a essere sicuro anche quando ha torto — è un problema noto delle reti con attivazioni ReLU, che estrapolano con eccessiva confidenza lontano dai dati visti in addestramento.
