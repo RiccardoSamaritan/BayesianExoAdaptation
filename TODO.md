@@ -247,10 +247,10 @@
 
 ## 10. Open-set (HAPT)
 
-- [ ] Source = steady-state activities, target = source + 6 postural transitions
+- [x] Source = steady-state activities, target = source + 6 postural transitions
   as target-private/OOD.
-- [ ] Report OS accuracy (incl. unknown class) and OS* (shared classes only).
-- [ ] Fallback: drop `LAYING` from 6-class source, keep in target.
+- [x] Report OS accuracy (incl. unknown class) and OS* (shared classes only).
+- [x] Fallback: drop `LAYING` from 6-class source, keep in target.
 
 ---
 
@@ -262,13 +262,3 @@
   dataset-pivot rationale (BASAN → HAR), standard HAR limitations (healthy
   subjects, no cost asymmetry, offline classification, phone-mounted sensor).
 - [ ] State model-selection protocol (no target labels used, ever).
-
----
-
-## 12. Stretch
-
-- [ ] Full-network KFAC vs. last-layer-only.
-- [ ] MC dropout / small ensemble comparison.
-- [ ] Learned feature extractor on `Inertial Signals/` vs. hand-engineered 561
-  features.
-- [ ] Cost-sensitive rejection.
