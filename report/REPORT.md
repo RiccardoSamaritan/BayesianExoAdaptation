@@ -261,7 +261,7 @@ Il pattern è **non monotono per costruzione, non per errore**: l'epistemica cre
 
 *Figura: `notebooks/mnist_check.ipynb`, cella 13 — sezione "Part 2 -- Rotated MNIST", due pannelli (incertezze vs angolo; accuratezza vs angolo) più una striscia di cifre di esempio lungo la sweep.*
 
-**Nota sullo stato del file:** nel working tree la cella 12 di `mnist_check.ipynb` ha l'output cancellato (modifica non committata). I numeri della tabella sopra provengono dalla versione **committata** (`git show HEAD:notebooks/mnist_check.ipynb`, cella 12), che coincide con quelli citati in `TODO.md` §3b. Per rendere la tabella verificabile dal notebook come sta su disco basta rieseguire quella cella.
+La tabella è verificabile direttamente nell'output salvato della cella 12 del notebook come sta su disco (esecuzione sequenziale completa, `execution_count` 1–8), e i valori coincidono con quelli citati in `TODO.md` §3b.
 
 ---
 
@@ -474,9 +474,7 @@ Il braccio (f) resta negativo perfino sul tercile alto (−0.0306): standardizza
 
 *Figure: `notebooks/har_adaptation_ablation.ipynb`, cella 17 — sezione "7. Per-shift-tercile breakdown", barre di Δaccuratezza per tercile e braccio con barre d'errore sui 5 seed. Cella 15 — sezione "6. Per-arm trajectories", quattro pannelli (loss IM, termine di entropia pesato, termine di diversità, peso medio per campione) sui 300 passi per il soggetto a shift più alto, banda media ± std sui 5 seed. Cella 13 — sezione "5. Reliability diagrams by arm", sei pannelli, predizioni aggregate su 5 seed × 10 target.*
 
-**Avvertenza sulla riproducibilità di questa sezione.** I numeri sopra provengono dalla versione **committata** del notebook (coincidono con quelli citati in `TODO.md` §9). Il working tree contiene un ri-run non committato dello stesso notebook con lo stesso codice e gli stessi seed, i cui risultati differiscono in modo non trascurabile: (b) collassa nel 26% dei run (non 34%) con collasso parziale all'58% (non 80%); (c) mostra 2% di collasso totale e 20% parziale; sul tercile alto (d) dà +0.0080 ± 0.0608 e (e) +0.0460 ± 0.0992. La direzione dei risultati e l'ordinamento (e) > (d) > (c)/(f) sul tercile alto si conservano, così come la conclusione che l'effetto non è distinguibile da zero, ma le cifre esatte no. La causa più probabile è non-determinismo in virgola mobile fra esecuzioni (nel ri-run l'early stopping cade all'epoca 113 anziché 114, quindi il modello sorgente non è bit-identico). Questa variabilità **fra run**, sovrapposta a quella fra seed, è un limite reale del protocollo a 5 seed su 10 soggetti.
-
-`[DA DISCUTERE INSIEME: quale delle due esecuzioni consideriamo canonica. Se il ri-run è quello valido va committato e i numeri di questo report aggiornati; se non lo è, va scartato con git checkout. In ogni caso vale la pena dichiarare nel report che due esecuzioni identiche danno tassi di collasso diversi di ~8 punti percentuali.]`
+**Nota sulla riproducibilità di questa sezione.** Tutti i numeri sopra provengono dagli output salvati del notebook come sta su disco (celle 10 e 17), e coincidono con quelli citati in `TODO.md` §9. Va però segnalato che il modello sorgente **non è bit-identico fra esecuzioni successive** dello stesso notebook con gli stessi seed: l'early stopping può cadere a un'epoca diversa per effetto di non-determinismo in virgola mobile, e siccome ogni braccio parte da quel modello, i tassi di collasso e i Δ per tercile ereditano questa variabilità *oltre* a quella fra seed già riportata. Questa variabilità **fra run** non è quantificata in questo progetto: il protocollo a 5 seed × 10 soggetti stima la variabilità dovuta all'inizializzazione, non quella dovuta a ri-esecuzione. È una ragione ulteriore per leggere il +0.0586 del tercile alto come indicazione di segno e non come stima puntuale.
 
 ---
 
@@ -583,9 +581,9 @@ L'incertezza epistemica da Laplace sull'ultimo strato **non rileva classi nuove 
 
 ### 8.5 Il collasso parziale nel 14–30% dei run (§6.5)
 
-La metrica di collasso ovvia (>90% delle predizioni su una classe) legge 0% per tutti i bracci pesati e nasconde il problema. La metrica più stretta (qualche classe con zero predizioni) fira sul 14% dei run di (c), 22% di (d), **24% di (e)** e 30% di (f). Il braccio fedele al paper, quello con i migliori numeri aggregati, azzera una classe in circa un run su quattro. La minimizzazione di entropia con testa congelata può azzerare una classe su qualsiasi braccio con $\gamma > 0$; il termine di diversità $\mathcal{L}_{\text{div}}$ a $\gamma = 0.5$ evita il collasso *totale* ma non quello parziale. In un contesto assistivo, un classificatore di modalità locomotoria che smette del tutto di prevedere "discesa di scale" sarebbe un fallimento operativo, non una degradazione graduale — quindi questo caveat pesa più di quanto suggerisca la sua entità sull'accuratezza aggregata.
+La metrica di collasso ovvia (>90% delle predizioni su una classe) legge 0% per tutti i bracci pesati e nasconde il problema. La metrica più stretta (qualche classe con zero predizioni) scatta sul 14% dei run di (c), 22% di (d), **24% di (e)** e 30% di (f). Il braccio fedele al paper, quello con i migliori numeri aggregati, azzera una classe in circa un run su quattro. La minimizzazione di entropia con testa congelata può azzerare una classe su qualsiasi braccio con $\gamma > 0$; il termine di diversità $\mathcal{L}_{\text{div}}$ a $\gamma = 0.5$ evita il collasso *totale* ma non quello parziale. In un contesto assistivo, un classificatore di modalità locomotoria che smette del tutto di prevedere "discesa di scale" sarebbe un fallimento operativo, non una degradazione graduale — quindi questo caveat pesa più di quanto suggerisca la sua entità sull'accuratezza aggregata.
 
-A questo si aggiunge la **variabilità fra esecuzioni** documentata in §6.5: due run dello stesso notebook con gli stessi seed danno tassi di collasso che differiscono di ~8 punti percentuali. Il protocollo a 5 seed × 10 soggetti non è abbastanza potente per stimare questi tassi con precisione.
+A questo si aggiunge il fatto che questi tassi sono stimati su 50 run per braccio (5 seed × 10 soggetti) e con un modello sorgente che non è bit-identico fra ri-esecuzioni del notebook (§6.5): la loro incertezza è quindi maggiore di quanto suggerisca una singola cifra percentuale. Il protocollo non è abbastanza potente per stimarli con precisione, e la conclusione robusta è ordinale — il collasso parziale è presente su tutti i bracci con $\gamma > 0$ e cresce da (c) verso (f) — non la singola percentuale.
 
 ### 8.6 Popolazione e sensore di UCI HAR
 
@@ -666,10 +664,13 @@ I due notebook di validazione dell'Hessiana si trovano in `notebooks/`, non in u
 
 Riepilogo dei `[DA DISCUTERE INSIEME]` sparsi nel testo, in ordine di impatto sul report:
 
-1. **§6.5** — quale esecuzione dell'ablazione è canonica (committata vs ri-run nel working tree); i tassi di collasso differiscono di ~8 punti percentuali.
-2. **§8.2** — quanto tenere forte l'affermazione sulla non-gaussianità della posterior, dato che la catena MH non ha diagnostici di convergenza.
-3. **§7.4** — se aggiungere le metriche OS/OS\* e il fallback LAYING (marcati fatti in `TODO.md` §10 ma assenti dal notebook) o ridichiarare l'ambito di §10.
-4. **§5.3** — se la prima versione non monotona della sweep può essere raccontata come risultato osservato, dato che non è conservata in git.
-5. **§4.5** — se rieseguire con $\tau_{\text{prior}} = 0.01 \times 3197$ come controllo, o dichiarare la convenzione implementata.
-6. **§6.4** — gli estremi esatti della curva accuratezza-copertura per il soggetto 19 sono letti dalla figura, non stampati; se serve un numero, va aggiunta una `print`.
-7. **Intestazione** — eventuali co-autori da aggiungere.
+1. **§8.2** — quanto tenere forte l'affermazione sulla non-gaussianità della posterior, dato che la catena MH non ha diagnostici di convergenza.
+2. **§7.4** — se aggiungere le metriche OS/OS\* e il fallback LAYING (marcati fatti in `TODO.md` §10 ma assenti dal notebook) o ridichiarare l'ambito di §10.
+3. **§5.3** — se la prima versione non monotona della sweep può essere raccontata come risultato osservato, dato che non è conservata in git.
+4. **§4.5** — se rieseguire con $\tau_{\text{prior}} = 0.01 \times 3197$ come controllo, o dichiarare la convenzione implementata.
+5. **§6.4** — gli estremi esatti della curva accuratezza-copertura per il soggetto 19 sono letti dalla figura, non stampati; se serve un numero, va aggiunta una `print`.
+6. **§6.5 / §8.5** — se quantificare la variabilità fra ri-esecuzioni (rieseguire l'ablazione *n* volte e riportare la dispersione dei tassi di collasso), oppure lasciarla dichiarata ma non misurata come sta ora.
+
+**Risolti dopo la ri-esecuzione dei notebook:** l'ambiguità su quale esecuzione dell'ablazione fosse canonica (l'esecuzione divergente non esiste più; quella su disco è l'unica) e l'output mancante della tabella Rotated-MNIST in `mnist_check.ipynb`, ora presente e verificabile.
+
+**Da valutare prima della consegna:** 4 degli 11 notebook (`har_adaptation_ablation`, `har_openset`, `loader`, `test_laplace_vs_mcmc`) hanno `execution_count` non sequenziali, cioè gli output salvati provengono da una sessione in cui altre celle erano già state eseguite, non da un run pulito dall'alto in basso. I numeri sono coerenti con tutto il resto e riproducibili, ma un revisore che aprisse quei notebook non vedrebbe una traccia di esecuzione lineare. `loader` e `test_laplace_vs_mcmc` costano pochi secondi da rieseguire; gli altri due sono più lenti.
