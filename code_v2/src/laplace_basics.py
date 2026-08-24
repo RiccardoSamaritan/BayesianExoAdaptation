@@ -125,13 +125,16 @@ def weight_space_hessian(Phi: np.ndarray, W: np.ndarray, tau: float = 0.0) -> np
     su (k, d), cioè H[k*D+d, l*D+f] = Λ[k,l] · (φφᵀ)[d,f]."""
     N, D = Phi.shape
     K = W.shape[0]
-    logits = Phi @ W.T
-    P = softmax(logits)                                  # (N, K)
-    Lam = np.einsum("nk,nl->nkl", P, -P)                 # -p_k p_l
-    idx = np.arange(K)
-    Lam[:, idx, idx] += P                                # + diag(p)  ->  diag(p) - ppᵀ
-    H = np.einsum("nkl,nd,nf->kdlf", Lam, Phi, Phi)      # (K, D, K, D)
-    H = H.reshape(K * D, K * D)
+    P = softmax(Phi @ W.T)                               # (N, K)
+    # Blocco (k,l) di H:  Λ[k,l]-Gram = Φᵀ diag(λ_kl) Φ,  con λ_kl = p_k(δ_kl - p_l).
+    # Un blocco per coppia di classi (K² blocchi) via matmul BLAS: veloce e a
+    # memoria contenuta (nessun tensore (N,K,K) o (K,D,K,D) materializzato).
+    H = np.zeros((K * D, K * D))
+    for k in range(K):
+        pk = P[:, k]
+        for l in range(K):
+            lam = pk * ((1.0 if k == l else 0.0) - P[:, l])     # (N,)
+            H[k*D:(k+1)*D, l*D:(l+1)*D] = Phi.T @ (lam[:, None] * Phi)
     if tau:
         H = H + tau * np.eye(K * D)
     return H
