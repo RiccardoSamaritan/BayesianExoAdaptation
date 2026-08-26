@@ -7,6 +7,10 @@
                     rivelatore OOD (rank-based, senza dipendenze esterne).
 - `rejection_curve`: accuratezza in funzione della copertura, rifiutando i punti a
                     più alta incertezza.
+- `reliability_bins`, `expected_calibration_error`: calibrazione (ECE, reliability
+                    diagram). Portate qui, invariate nella matematica, da
+                    src/calibration.py del progetto principale (che non ha un
+                    equivalente in code_v2) -- usate dai notebook digits.
 """
 import numpy as np
 
@@ -78,3 +82,35 @@ def rejection_curve(uncertainty: np.ndarray, correct: np.ndarray, n_points: int 
         k = max(1, int(round(c * N)))
         accs.append(cor_sorted[:k].mean())
     return coverages, np.array(accs)
+
+
+def reliability_bins(probs: np.ndarray, y: np.ndarray, n_bins: int = 15) -> dict:
+    """Confidenza/accuratezza per bin, per un reliability diagram. Il bin b copre
+    confidenza in [edges[b], edges[b+1)). Bin vuoti -> NaN in bin_acc/bin_conf
+    (così possono essere saltati nel plot/nell'aggregazione)."""
+    confidences = probs.max(axis=1)
+    preds = probs.argmax(axis=1)
+    correct = (preds == y).astype(float)
+
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_idx = np.clip(np.digitize(confidences, bin_edges[1:-1]), 0, n_bins - 1)
+
+    bin_acc = np.full(n_bins, np.nan)
+    bin_conf = np.full(n_bins, np.nan)
+    bin_count = np.zeros(n_bins, dtype=int)
+    for b in range(n_bins):
+        mask = bin_idx == b
+        bin_count[b] = mask.sum()
+        if mask.any():
+            bin_acc[b] = correct[mask].mean()
+            bin_conf[b] = confidences[mask].mean()
+    return dict(bin_edges=bin_edges, bin_acc=bin_acc, bin_conf=bin_conf, bin_count=bin_count)
+
+
+def expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = 15) -> float:
+    """ECE standard: somma_b (n_b / N) * |acc_b - conf_b|."""
+    bins = reliability_bins(probs, y, n_bins=n_bins)
+    n = len(y)
+    weights = bins["bin_count"] / n
+    gaps = np.abs(bins["bin_acc"] - bins["bin_conf"])
+    return float(np.nansum(weights * np.nan_to_num(gaps)))

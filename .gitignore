@@ -2,10 +2,11 @@
 data/MNIST/
 data/FashionMNIST/
 
-# digits/ experiment: dataset cache (regenerate with notebooks/digits_download.ipynb)
-# and trained checkpoint (regenerate with digits/train.py, ~25 min on MPS)
-digits/data/
-digits/models/
+# code_v2 digits experiment: dataset cache (regenerate with
+# code_v2/notebooks/05_digits_data.ipynb) and trained checkpoint (regenerate
+# with code_v2/src/digits_train.py, ~25 min on MPS)
+code_v2/data/digits/
+code_v2/models/
 
 # macOS Finder metadata
 .DS_Store
