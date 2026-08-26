@@ -2,10 +2,12 @@
 data/MNIST/
 data/FashionMNIST/
 
-# code_v2 digits experiment: dataset cache (regenerate with
-# code_v2/notebooks/05_digits_data.ipynb) and trained checkpoint (regenerate
-# with code_v2/src/digits_train.py, ~25 min on MPS)
-code_v2/data/digits/
+# code_v2: all generated/downloaded artifacts -- dataset caches (MNIST,
+# FashionMNIST, digits/ regenerate with code_v2/notebooks/05_digits_data.ipynb),
+# saved model/Laplace artifacts from notebooks 02/06 (mnist_cnn.pt,
+# mnist_laplace.npz, svhn_cnn.pt, svhn_laplace.npz), and trained checkpoints
+# (regenerate with code_v2/src/digits_train.py, ~25 min on MPS)
+code_v2/data/
 code_v2/models/
 
 # macOS Finder metadata

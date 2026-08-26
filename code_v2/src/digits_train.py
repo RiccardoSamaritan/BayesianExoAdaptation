@@ -82,6 +82,12 @@ def evaluate(model: nn.Module, loader: DataLoader) -> tuple:
 
 
 def main():
+    ckpt_path = CHECKPOINT_DIR / "model.pt"
+    if ckpt_path.exists():
+        print(f"{ckpt_path} esiste già -- training saltato (nessun nuovo modello addestrato). "
+              f"Cancella il file, o usa un altro CHECKPOINT_DIR, per riaddestrare da zero.")
+        return
+
     torch.manual_seed(SEED)
     np.random.seed(SEED)
     print(f"Device: {DEVICE}")

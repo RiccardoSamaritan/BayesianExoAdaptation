@@ -170,13 +170,48 @@ class LastLayerLaplace:
         N = Phi_aug.shape[0]
         thetas = self.sample_heads(M, rng).reshape(M, self.K, self.Dp)  # (M,K,Dp)
         # logits[m,n,k] = φ_n · θ_{m,k}
-        logits = np.einsum("mkd,nd->mnk", thetas, Phi_aug)             # (M,N,K)
+        # optimize=True: senza, questo einsum misura ~4x più lento su N e M
+        # grandi (es. 27s vs 6.8s per M=2000, N=26032) -- stesso risultato,
+        # solo un percorso di contrazione più efficiente.
+        logits = np.einsum("mkd,nd->mnk", thetas, Phi_aug, optimize=True)  # (M,N,K)
         probs_m = softmax(logits)                                      # (M,N,K)
         p_mean = probs_m.mean(axis=0)                                  # (N,K)
         total = _entropy(p_mean)                                       # (N,)
         aleatoric = _entropy(probs_m).mean(axis=0)                     # (N,)
         epistemic = total - aleatoric
         return dict(probs=p_mean, total=total, aleatoric=aleatoric, epistemic=epistemic)
+
+    def predictive_batched(self, Phi_aug: np.ndarray, M: int = 200,
+                           rng: np.random.Generator = None, batch_size: int = None,
+                           target_bytes: int = 300_000_000) -> dict:
+        """Come `predictive`, ma a pezzi su N: `predictive` materializza un
+        tensore denso (M, N, K) -- per M ed N grandi insieme (es. M=5000 su
+        N=26.032 immagini, K=10) sono ~10.4 GB in un solo array, sufficienti
+        a mandare in swap pesante o in OOM una macchina con poca RAM (osservato
+        direttamente: kernel Jupyter crashato). Qui Phi_aug è processato in
+        blocchi di `batch_size` righe, tenendo il tensore denso a
+        `batch_size * M * K` elementi indipendentemente da N. Ogni blocco usa
+        theta campionati indipendentemente (stesso `rng`, che avanza fra un
+        blocco e l'altro): non introduce bias nelle statistiche per-punto
+        restituite (`total`/`aleatoric`/`epistemic` per ciascun punto restano
+        medie Monte Carlo sui propri M campioni, indipendentemente da come i
+        campioni sono raggruppati fra i punti)."""
+        if rng is None:
+            rng = np.random.default_rng(0)
+        N = Phi_aug.shape[0]
+        if batch_size is None:
+            # dimensiona il blocco così che il tensore denso (batch_size, M, K)
+            # resti sotto target_bytes, indipendentemente da quanto M è grande
+            batch_size = max(1, int(target_bytes / (M * self.K * 8)))
+        probs_parts, total_parts, ale_parts, epi_parts = [], [], [], []
+        for start in range(0, N, batch_size):
+            chunk = self.predictive(Phi_aug[start:start + batch_size], M=M, rng=rng)
+            probs_parts.append(chunk["probs"])
+            total_parts.append(chunk["total"])
+            ale_parts.append(chunk["aleatoric"])
+            epi_parts.append(chunk["epistemic"])
+        return dict(probs=np.concatenate(probs_parts), total=np.concatenate(total_parts),
+                    aleatoric=np.concatenate(ale_parts), epistemic=np.concatenate(epi_parts))
 
 
 def _entropy(p: np.ndarray, eps: float = 1e-12) -> np.ndarray:
