@@ -1,8 +1,10 @@
 """Information-maximization (IM) source-free adaptation with uncertainty-guided
 down-weighting (U-SFAN), ported here from the main project's `src/im_adapt.py`
-(not modified there) because `code_v2/src/` has no adaptation code of its own
--- notebooks 00-04 only ever *measure* shift (AUROC, rejection curve), they
-never adapt a model to it.
+(not modified there) because `code_v2/src/` had no adaptation code of its
+own before this file -- the MNIST pedagogical notebooks (00, 01, 03-05)
+only ever *measure* shift (AUROC, rejection curve), they never adapt a
+model to it (notebook 02, `synthetic_track.ipynb`, does adapt, via the main
+project's own `src/im_adapt.py` directly, not this port).
 
     L_ent = -E_x sum_k p_k(x) log p_k(x)                (per-sample entropy)
     L_div = D_KL(p_hat || uniform) - log K = -H[p_hat]  (batch diversity)
@@ -13,6 +15,22 @@ the conventional SHOT-IM baseline; `weight_mode="uncertainty"` reproduces
 U-SFAN, using w_i = exp(-H_i) with H_i the total predictive entropy of the
 frozen Bayesian head's MC predictive (recomputed every step from the
 *current*, adapting features).
+
+`weight_mode="epistemic_only"` is a deliberate **deviation from the
+paper** (Eq. 6-7 weights by the *total* predictive entropy, not the
+epistemic component alone), not an alternative replication of the method:
+a diagnostic ablation to test whether aleatoric dominance in the total
+entropy (see `11_digits_shift_adapt.ipynb`'s markdown discussion) is
+responsible for U-SFAN's weighting doing little/worse than SHOT-IM.
+w_i = exp(-z_i) with z_i = (epistemic_i - source_epi_median) /
+source_epi_iqr -- the raw epistemic value is never used directly (it is
+not on a comparable scale across points/domains, same reasoning as
+`normalize_epistemic` in the main project's `src/bayesian.py`), and the
+median/IQR reference is a **fixed** quantity computed once from the
+source domain (never recomputed per-batch/per-step on the target, which
+would defeat the purpose of measuring how far a target point sits from
+the source's own epistemic distribution) -- passed in via
+`source_epi_median`/`source_epi_iqr`, required for this mode.
 
 Bridging torch/numpy: unlike `src/im_adapt.py` (whose `LastLayerLaplace` is
 a torch class, so everything stays in torch), `code_v2/src/bayesian_model.py`'s
@@ -50,13 +68,19 @@ def im_loss(logits: torch.Tensor, weights: torch.Tensor = None, gamma: float = 0
 
 def adapt_target(model, laplace: LastLayerLaplace, X_target: torch.Tensor,
                  weight_mode: str = "uncertainty", gamma: float = 0.5, temperature: float = 0.4,
-                 lr: float = 1e-2, steps: int = 300, M: int = 100, seed: int = 0) -> dict:
+                 lr: float = 1e-2, steps: int = 300, M: int = 100, seed: int = 0,
+                 source_epi_median: float = None, source_epi_iqr: float = None) -> dict:
     """Adapts `model.g` in place on unlabeled `X_target` via (weighted) IM
     loss. `model.h` stays frozen. `model`: an instance with `.features(x)`
     and `.h` (e.g. `SmallCNN32`). `laplace`: already fit on the source
-    (numpy `LastLayerLaplace`, `bayesian_model.py`). Returns the loss
-    trajectory for diagnostics."""
-    assert weight_mode in ("none", "uncertainty")
+    (numpy `LastLayerLaplace`, `bayesian_model.py`). `source_epi_median`/
+    `source_epi_iqr` are required only for `weight_mode="epistemic_only"`
+    (precompute once from the source domain's own epistemic distribution,
+    see module docstring). Returns the loss trajectory for diagnostics."""
+    assert weight_mode in ("none", "uncertainty", "epistemic_only")
+    if weight_mode == "epistemic_only" and (source_epi_median is None or source_epi_iqr is None):
+        raise ValueError("weight_mode='epistemic_only' requires source_epi_median/source_epi_iqr "
+                         "precomputed once from the source domain, not derived from X_target")
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     for p in model.h.parameters():
@@ -73,6 +97,13 @@ def adapt_target(model, laplace: LastLayerLaplace, X_target: torch.Tensor,
                 phi_aug = np.concatenate([phi, np.ones((phi.shape[0], 1))], axis=1)
                 pred = laplace.predictive(phi_aug, M=M, rng=rng)
                 weights = torch.exp(-torch.from_numpy(pred["total"]).float())
+        elif weight_mode == "epistemic_only":
+            with torch.no_grad():
+                phi = model.features(X_target).cpu().numpy()
+                phi_aug = np.concatenate([phi, np.ones((phi.shape[0], 1))], axis=1)
+                pred = laplace.predictive(phi_aug, M=M, rng=rng)
+                z = (pred["epistemic"] - source_epi_median) / source_epi_iqr
+                weights = torch.exp(-torch.from_numpy(z).float())
         else:
             weights = None
         loss, ent, div = im_loss(logits, weights=weights, gamma=gamma)

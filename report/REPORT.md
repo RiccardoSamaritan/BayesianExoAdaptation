@@ -266,7 +266,7 @@ La diagnosi di questo scostamento — una distribuzione a posteriori quasi separ
 
 > **Perché un problema giocattolo.** Prima di applicare il metodo a dati reali, dove non si sa quale sia la risposta giusta, conviene provarlo su un problema costruito a tavolino, con due sole dimensioni, dove tutto si può disegnare e la risposta giusta è nota per costruzione. In inglese si chiama *toy problem*, «problema giocattolo»: non serve a dimostrare che il metodo funziona nel mondo reale, serve a escludere che sia rotto — e a rendere visibile il meccanismo.
 
-`notebooks/synthetic_track.ipynb`. Tre classi in due dimensioni (rosso, verde, blu), estrattore a due strati `2 → 32 → 16`, stima puntuale con accuratezza 1.000 in addestramento, matrice di covarianza $51\times51$ con autovalori tutti positivi, nell'intervallo $[0.0290,\, 22.2234]$ (cella 3). Due regimi di spostamento, generati muovendo i centri delle tre nuvole di punti: `mild` («mite»: tutti i centri spostati di poco) e `strong` («forte»: la nuvola blu trascinata in una regione che il modello sorgente chiama con sicurezza «rosso»).
+`code_v2/notebooks/02_synthetic_track.ipynb`. Tre classi in due dimensioni (rosso, verde, blu), estrattore a due strati `2 → 32 → 16`, stima puntuale con accuratezza 1.000 in addestramento, matrice di covarianza $51\times51$ con autovalori tutti positivi, nell'intervallo $[0.0290,\, 22.2234]$ (cella 3). Due regimi di spostamento, generati muovendo i centri delle tre nuvole di punti: `mild` («mite»: tutti i centri spostati di poco) e `strong` («forte»: la nuvola blu trascinata in una regione che il modello sorgente chiama con sicurezza «rosso»).
 
 > **A cosa serve il regime mite.** È un **controllo negativo**, cioè un caso in cui il metodo non deve fare *niente*. Il target è già classificato correttamente senza adattamento: se dopo l'adattamento l'accuratezza scendesse, vorrebbe dire che la procedura danneggia situazioni sane. Un esperimento che mostra solo i casi in cui un metodo aiuta, senza mostrare che non nuoce quando non serve, è incompleto.
 
@@ -283,7 +283,7 @@ Questa è la replica, qualitativa e quantitativa, della Fig. 4 del paper: sotto 
 
 > **Perché guardare la sola classe spostata e non solo l'accuratezza totale.** Le tre classi hanno lo stesso numero di punti, quindi due classi classificate perfettamente e una completamente sbagliata danno già un'accuratezza totale attorno al 67%: un numero che sembra mediocre ma non catastrofico, e che nasconde il fatto che una classe è totalmente perduta. Riportare a parte l'accuratezza sulla classe spostata rende visibile il fallimento reale — 6% significa che quasi nessun punto blu è riconosciuto — e il recupero reale.
 
-*Figure: `notebooks/synthetic_track.ipynb`, cella 7 — sezione "Box 1 -- Fig. 4 replication", due figure 2×3 (una per regime), righe = MAP convenzionale vs guidato dall'incertezza, colonne = Source / Target / SFDA (IM), con superficie di probabilità sfumata in base alla confidenza. Cella 9: mappe affiancate di incertezza epistemica e aleatoria del modello sorgente, con i due punti sonda marcati.*
+*Figure: `code_v2/notebooks/02_synthetic_track.ipynb`, cella 7 — sezione "Box 1 -- Fig. 4 replication", due figure 2×3 (una per regime), righe = MAP convenzionale vs guidato dall'incertezza, colonne = Source / Target / SFDA (IM), con superficie di probabilità sfumata in base alla confidenza. Cella 9: mappe affiancate di incertezza epistemica e aleatoria del modello sorgente, con i due punti sonda marcati.*
 
 **Due calibrazioni specifiche del problema giocattolo da dichiarare, non da nascondere** (entrambe documentate nelle celle markdown 2 e 6 del notebook):
 
@@ -302,7 +302,7 @@ Risultati: il punto lontano, di coordinate $(-4,-4)$, dà epistemica 0.3404 cont
 
 Risultato: correlazione di Spearman fra entità dello spostamento e incertezza epistemica media sulla classe spostata pari a **0.927**, con probabilità che un accordo così forte nasca dal caso pari a $1.12\times10^{-4}$.
 
-*Figura: `notebooks/synthetic_track.ipynb`, cella 13 — sezione "Box 3 -- Shift-magnitude sweep", curva epistemica media vs magnitudine di shift con ρ e p nel titolo.*
+*Figura: `code_v2/notebooks/02_synthetic_track.ipynb`, cella 13 — sezione "Box 3 -- Shift-magnitude sweep", curva epistemica media vs magnitudine di shift con ρ e p nel titolo.*
 
 La scelta della direzione **radiale** è un punto metodologico, non cosmetico, e la motivazione è documentata nel docstring di `src/toy.py::make_classification_sweep` e nella cella markdown 12: muovendo la nuvola di punti verso il centro di un'altra classe la relazione non può essere monotona, perché a un certo punto la nuvola spostata si avvicina di nuovo a densità sorgente e l'epistemica *scende* mentre la magnitudine di shift continua a crescere. Muovendolo radialmente verso l'esterno, il nuvola si allontana monotonamente da ogni nuvola sorgente e la monotonia dell'ipotesi è ben posta. Lo stesso fenomeno si osserva su dati reali con Rotated-MNIST (§5.4): non è un artefatto del problema giocattolo ma una proprietà generale dell'incertezza epistemica, che misura distanza dai dati visti e non "quantità di corruzione".
 

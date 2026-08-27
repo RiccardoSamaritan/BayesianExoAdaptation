@@ -2,7 +2,7 @@
 
 `bayesian_model.py::SmallCNN` è tarata esplicitamente per immagini 1x28x28
 (`nn.Linear(32 * 7 * 7, feature_dim)`, 28 -> 14 -> 7 con due MaxPool2d(2)) --
-non modificata qui per non rischiare di rompere i notebook 02/03/04 che la
+non modificata qui per non rischiare di rompere i notebook 03/04/05 che la
 usano così com'è. `SmallCNN32` sotto è la stessa architettura (stessa
 filosofia: 2 blocchi conv -> feature -> testa lineare, solo `h` riceve il
 trattamento bayesiano), ridimensionata per l'input 32x32 di questo esperimento

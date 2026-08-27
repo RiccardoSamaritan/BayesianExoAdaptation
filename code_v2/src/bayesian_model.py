@@ -1,6 +1,6 @@
 """Generazione del modello bayesiano source + decomposizione BALD.
 
-Usato dai notebook 2 e 3. La filosofia (paper U-SFAN, Sec. 3.1):
+Usato dai notebook 3 e 4. La filosofia (paper U-SFAN, Sec. 3.1):
 
     f = h ∘ g.  Il feature extractor g (una CNN, parametri β) resta
     DETERMINISTICO e congelato. Il trattamento bayesiano riguarda SOLO
@@ -220,7 +220,7 @@ def _entropy(p: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 # ======================================================================
-# Validazione: posterior vera via MCMC (Metropolis-Hastings) — notebook 2
+# Validazione: posterior vera via MCMC (Metropolis-Hastings) — notebook 3
 # ======================================================================
 
 def _log_posterior(w_flat, Phi, y, K, tau):

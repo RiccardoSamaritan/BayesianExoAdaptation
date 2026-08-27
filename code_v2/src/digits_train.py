@@ -10,14 +10,14 @@ Weight decay: `WEIGHT_DECAY = 1e-3` below, passed straight into `AdamW`
 (same value `bayesian_model.py::train_map` itself uses as its own default).
 Kept explicit here because it is what a later `tau_prior = weight_decay *
 N_source` last-layer Laplace fit needs (same convention as
-`har_train.py`/`code_v2/notebooks/02_bayesian_source_mnist.ipynb`, both of
+`har_train.py`/`code_v2/notebooks/03_bayesian_source_mnist.ipynb`, both of
 which derive `tau_prior` the same way) -- this file only trains and saves
 the checkpoint; fitting the Laplace posterior is left to the notebook that
 uses it.
 
 Not built on top of `bayesian_model.py::train_map` directly: `train_map`
 runs a fixed epoch budget with no validation split and no early stopping,
-which is fine for MNIST in `02_bayesian_source_mnist.ipynb` (3 epochs is
+which is fine for MNIST in `03_bayesian_source_mnist.ipynb` (3 epochs is
 enough there) but not for SVHN, which needs more epochs to converge and
 clearly overfits past its best point if left running (observed at ~24
 epochs in an earlier version of this experiment, before it was moved

@@ -1,5 +1,5 @@
 """Loads the MNIST/USPS/SVHN numpy caches produced by
-code_v2/notebooks/05_digits_data.ipynb and applies the shared preprocessing
+code_v2/notebooks/07_digits_data.ipynb and applies the shared preprocessing
 every domain needs before they can be fed to the same model:
 
 1. Grayscale: MNIST and USPS are already single-channel; only SVHN (RGB)
@@ -40,7 +40,7 @@ def _load_raw(domain: str, split: str) -> tuple:
     npz_path = DATA_DIR / f"{domain}_{split}.npz"
     if not npz_path.exists():
         raise FileNotFoundError(f"{npz_path} not found -- run "
-                                f"code_v2/notebooks/05_digits_data.ipynb first")
+                                f"code_v2/notebooks/07_digits_data.ipynb first")
     npz = np.load(npz_path)
     return npz["X"], npz["y"]
 

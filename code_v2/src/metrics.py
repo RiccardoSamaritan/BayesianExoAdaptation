@@ -1,4 +1,4 @@
-"""Metriche di shift e di detection OOD — usate dai notebook 4 e 5.
+"""Metriche di shift e di detection OOD — usate dai notebook 5 e 6.
 
 - `mmd_rbf`        : Maximum Mean Discrepancy con kernel RBF, misura di shift fra
                     due insiemi di feature (proxy di distanza fra distribuzioni,
