@@ -31,6 +31,7 @@ slow conv path in this machine's CPU-only PyTorch build (measured directly
 on the previous architecture: ~24x slower per training step than MPS).
 Falls back to CPU automatically if MPS is unavailable.
 """
+import os
 import sys
 import time
 from pathlib import Path
@@ -65,7 +66,40 @@ SEED = 2019
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "models" / "source_svhn"
 
-DEVICE = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+
+def resolve_device(device_name: str | None = None) -> torch.device:
+    """Resolve the preferred training device, with CUDA > MPS > CPU.
+
+    Users may override via `--device cuda|mps|cpu` or the environment variable
+    `BAYESIAN_EXO_DEVICE`.
+    """
+    override = (device_name or os.environ.get("BAYESIAN_EXO_DEVICE") or "").strip().lower()
+    if override:
+        if override in {"cuda", "gpu"}:
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA requested but not available on this machine.")
+            return torch.device("cuda")
+        if override == "mps":
+            if not torch.backends.mps.is_available():
+                raise RuntimeError("MPS requested but not available on this machine.")
+            return torch.device("mps")
+        if override == "cpu":
+            return torch.device("cpu")
+        raise ValueError(f"Unsupported device '{device_name}'. Use cuda, mps, or cpu.")
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+for arg in sys.argv[1:]:
+    if arg.startswith("--device="):
+        DEVICE = resolve_device(arg.split("=", 1)[1])
+        break
+else:
+    DEVICE = resolve_device()
 
 
 def evaluate(model: nn.Module, loader: DataLoader) -> tuple:
@@ -95,6 +129,8 @@ def train_source_model(seed: int = SEED, source_domain: str = SOURCE_DOMAIN, ver
     afterwards without re-doing any of this."""
     target_domains = [d for d in ["mnist", "usps", "svhn"] if d != source_domain]
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     if verbose:
         print(f"Device: {DEVICE}")
