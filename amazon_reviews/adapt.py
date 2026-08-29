@@ -53,7 +53,7 @@ def fit_laplace_and_check_convergence(model, Phi_aug_train: np.ndarray, tau_prio
     M_REFERENCE, require both relative (1%) and absolute (2% of the max
     observed) deviation under threshold for 3 consecutive M values,
     simultaneously across every domain in `eval_domains`) to pick
-    `M_FIXED`. Same protocol as `code_v2/notebooks/09_digits_bald.ipynb`
+    `M_FIXED`. Same protocol as `code_v2/notebooks/10_digits_bald.ipynb`
     and `sentiment_calibration.ipynb`, reused here instead of re-derived.
 
     Returns dict(laplace, M_FIXED, convergence, ref_epi)."""
