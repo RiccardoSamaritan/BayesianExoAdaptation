@@ -85,7 +85,7 @@ def train_source_model(seed: int = SEED, source_domain: str = SOURCE_DOMAIN, ver
     """Trains one SVHN source model end-to-end for a given `seed` -- the
     internal train/val split, the weight init, and the minibatch order all
     re-derive from it. Used by both `main()` below (single run, `seed=SEED
-    =2019`, saves a checkpoint) and `code_v2/notebooks/14_digits_multiseed.ipynb`
+    =2019`, saves a checkpoint) and `code_v2/notebooks/15_digits_multiseed.ipynb`
     (5 independent calls, one per seed, nothing saved to disk -- kept in
     memory for that notebook's own aggregation).
 
