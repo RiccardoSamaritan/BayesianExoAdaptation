@@ -1,8 +1,19 @@
-"""Metriche di shift e di detection OOD — usate dai notebook 5 e 6.
+"""Metriche di shift e di detection OOD.
+
+Consumatori effettivi dentro code_v2 (verificato, non assunto):
+  auroc, rejection_curve                      -> 05_shift_mnist, 12_digits_shift_adapt
+  reliability_bins, expected_calibration_error -> 11_digits_calibration, 12_digits_shift_adapt
+  mmd_rbf, median_gamma                        -> nessuno (vedi sotto)
 
 - `mmd_rbf`        : Maximum Mean Discrepancy con kernel RBF, misura di shift fra
                     due insiemi di feature (proxy di distanza fra distribuzioni,
                     calcolata nello spazio delle feature, non sull'input grezzo).
+                    NON usata da alcun notebook di code_v2: tutte le tracce qui
+                    misurano lo shift con l'incertezza epistemica (AUROC), che è
+                    il segnale di cui il progetto vuole dimostrare la validità.
+                    Tenuta perché è il termine di confronto naturale se si
+                    volesse mostrare che l'epistemica batte (o no) una misura di
+                    distanza fra distribuzioni puramente geometrica.
 - `auroc`         : area sotto la ROC, per valutare uno score di incertezza come
                     rivelatore OOD (rank-based, senza dipendenze esterne).
 - `rejection_curve`: accuratezza in funzione della copertura, rifiutando i punti a

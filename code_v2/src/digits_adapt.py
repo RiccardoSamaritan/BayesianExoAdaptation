@@ -73,8 +73,20 @@ def adapt_target(model, laplace: LastLayerLaplace, X_target: torch.Tensor,
             with torch.no_grad():
                 phi = model.features(X_target).cpu().numpy()
                 phi_aug = np.concatenate([phi, np.ones((phi.shape[0], 1))], axis=1)
+                # `predictive` sceglie da sola il backend (CUDA se disponibile,
+                # altrimenti numpy) e al suo interno spezza gia' il tensore denso
+                # (M, N, K) in blocchi: con M=100, N=10.000, K=10 sono ~40 MB in
+                # float32, ampiamente sotto il limite. E' questa chiamata a dominare
+                # il costo per step -- vedi il commento sul backend CUDA in
+                # bayesian_model.py, che la rende ~60x piu' veloce su forme reali.
                 pred = laplace.predictive(phi_aug, M=M, rng=rng)
-                weights = torch.exp(-torch.from_numpy(pred["total"]).float())
+                # `.to(logits.device)`: il peso nasce in numpy (quindi su CPU) mentre i
+                # logit possono stare su GPU. Senza questa riga `im_loss` solleva
+                # "Expected all tensors to be on the same device", cioe' adapt_target
+                # funzionava solo con il modello su CPU -- proprio la configurazione piu'
+                # lenta, visto che il forward/backward full-batch e' il costo dominante
+                # per step (misurato: 4.42 s/step su CPU con N=10.000).
+                weights = torch.exp(-torch.from_numpy(pred["total"]).float()).to(logits.device)
         else:
             weights = None
         loss, ent, div = im_loss(logits, weights=weights, gamma=gamma)

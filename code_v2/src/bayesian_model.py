@@ -58,7 +58,12 @@ class SmallCNN(nn.Module):
 class MLPClassifier(nn.Module):
     """Feature extractor MLP per feature tabellari (es. i 561 attributi di UCI-HAR):
     input -> hidden -> feature -> testa lineare. Stessa interfaccia di SmallCNN
-    (`features` + `h`), così l'intera pipeline bayesiana si riusa invariata."""
+    (`features` + `h`), così l'intera pipeline bayesiana si riusa invariata.
+
+    NON usata da alcun notebook di code_v2 (verificato): qui tutti gli esperimenti
+    sono su immagini, quindi passano da SmallCNN/SmallCNN32. È tenuta perché è la
+    dimostrazione concreta che la parte bayesiana (`LastLayerLaplace`) non sa nulla
+    dell'architettura di `g`: le basta `.features(x)` e `.h`."""
 
     def __init__(self, in_dim: int, n_classes: int, hidden: int = 128, feature_dim: int = 64):
         super().__init__()
@@ -152,23 +157,38 @@ class LastLayerLaplace:
 
     def sample_heads(self, M: int, rng: np.random.Generator) -> np.ndarray:
         """M campioni θ ~ N(θ_MAP, cov), forma (M, K*Dp)."""
-        L = np.linalg.cholesky(self.cov)
+        # Cholesky memorizzata: la cov non cambia dopo il fit, ma `predictive_batched`
+        # richiama sample_heads una volta per blocco. Su (1290, 1290) ogni fattorizzazione
+        # costa ~0.1 s, che su uno sweep di convergenza (decine di blocchi x 9 valori di M
+        # x 3 domini) diventa il costo dominante una volta che il resto gira su GPU.
+        L = getattr(self, "_chol", None)
+        if L is None:
+            L = np.linalg.cholesky(self.cov)
+            self._chol = L
         eps = rng.standard_normal((M, self.K * self.Dp))
         return self.theta_map[None, :] + eps @ L.T
 
     def predictive(self, Phi_aug: np.ndarray, M: int = 200,
-                   rng: np.random.Generator = None) -> dict:
+                   rng: np.random.Generator = None, device: str = None) -> dict:
         """Predittiva MC integrata sulla posterior + decomposizione BALD.
 
         Per ogni punto: campiona M teste, calcola p(y|x,θ_m), poi
             total     = H[ (1/M) Σ_m p_m ]           (entropia della media)
             aleatoric = (1/M) Σ_m H[p_m]              (media delle entropie)
             epistemic = total - aleatoric             (mutual information, BALD)
-        Ritorna probs medie (N,K) e le tre entropie (N,)."""
+        Ritorna probs medie (N,K) e le tre entropie (N,).
+
+        `device`: None = automatico (CUDA se disponibile, altrimenti numpy);
+        "cpu"/"numpy" forza il percorso numpy; "cuda" lo richiede e fallisce se
+        assente. Vedi `resolve_predictive_device` per il perché."""
         if rng is None:
             rng = np.random.default_rng(0)
-        N = Phi_aug.shape[0]
+        # Il campionamento di θ resta SEMPRE in numpy, guidato dallo stesso `rng`:
+        # così cambiare device non cambia quali teste vengono estratte, e le due
+        # implementazioni restano confrontabili a parità di campioni.
         thetas = self.sample_heads(M, rng).reshape(M, self.K, self.Dp)  # (M,K,Dp)
+        if resolve_predictive_device(device) == "cuda":
+            return _predictive_cuda(thetas, Phi_aug)
         # logits[m,n,k] = φ_n · θ_{m,k}
         # optimize=True: senza, questo einsum misura ~4x più lento su N e M
         # grandi (es. 27s vs 6.8s per M=2000, N=26032) -- stesso risultato,
@@ -183,7 +203,7 @@ class LastLayerLaplace:
 
     def predictive_batched(self, Phi_aug: np.ndarray, M: int = 200,
                            rng: np.random.Generator = None, batch_size: int = None,
-                           target_bytes: int = 300_000_000) -> dict:
+                           target_bytes: int = 300_000_000, device: str = None) -> dict:
         """Come `predictive`, ma a pezzi su N: `predictive` materializza un
         tensore denso (M, N, K) -- per M ed N grandi insieme (es. M=5000 su
         N=26.032 immagini, K=10) sono ~10.4 GB in un solo array, sufficienti
@@ -205,7 +225,8 @@ class LastLayerLaplace:
             batch_size = max(1, int(target_bytes / (M * self.K * 8)))
         probs_parts, total_parts, ale_parts, epi_parts = [], [], [], []
         for start in range(0, N, batch_size):
-            chunk = self.predictive(Phi_aug[start:start + batch_size], M=M, rng=rng)
+            chunk = self.predictive(Phi_aug[start:start + batch_size], M=M, rng=rng,
+                                    device=device)
             probs_parts.append(chunk["probs"])
             total_parts.append(chunk["total"])
             ale_parts.append(chunk["aleatoric"])
@@ -217,6 +238,82 @@ class LastLayerLaplace:
 def _entropy(p: np.ndarray, eps: float = 1e-12) -> np.ndarray:
     """Entropia di Shannon lungo l'ultimo asse (nats)."""
     return -(p * np.log(p + eps)).sum(axis=-1)
+
+
+# ======================================================================
+# Backend CUDA per la predittiva MC
+# ======================================================================
+#
+# Perché esiste. La predittiva MC materializza un tensore (M, N, K) e ci passa
+# sopra piu' volte (exp, somma, divisione, log, prodotto, somma). Su forme reali
+# è lavoro **limitato dalla banda di memoria, non dai FLOP**: misurato su
+# M=1000, N=26.032, K=10, Dp=129, l'einsum costa 0.21 s e softmax+entropia 0.95 s,
+# cioè l'82% del tempo è elementwise. È esattamente il profilo in cui una GPU
+# vince molto piu' di quanto il suo picco di FLOP suggerirebbe.
+#
+# Tempi misurati sulla stessa forma (GTX 1650, torch 2.5.1+cu121):
+#     numpy CPU float64  : 11.30 s
+#     torch CUDA float64 :  1.75 s   (6.5x)
+#     torch CUDA float32 :  0.18 s   (64x)
+# La float64 su questa GPU rende poco (rapporto FP64:FP32 di 1:32), quindi il
+# percorso CUDA usa float32. Sulle stesse teste campionate, float32 e float64
+# danno la stessa epistemica media a meno di ~1e-6 nat -- tre ordini di
+# grandezza sotto la soglia dell'1% relativo usata dai controlli di convergenza
+# MC dei notebook, e ben sotto il rumore Monte Carlo stesso. `demo()` in fondo
+# al modulo verifica questa equivalenza a ogni esecuzione.
+#
+# Il campionamento di θ resta in numpy float64 in entrambi i casi: è guidato dal
+# `rng` passato dal chiamante, quindi il device non cambia *quali* teste vengono
+# estratte, solo come vengono integrate.
+
+_PREDICTIVE_DEVICE_CACHE = {}
+
+
+def resolve_predictive_device(device: str = None) -> str:
+    """Risolve il backend della predittiva MC. None = automatico (CUDA se
+    disponibile, altrimenti numpy); "cpu"/"numpy" forzano numpy; "cuda" lo
+    richiede ed è un errore se assente."""
+    if device is None:
+        if "auto" not in _PREDICTIVE_DEVICE_CACHE:
+            _PREDICTIVE_DEVICE_CACHE["auto"] = "cuda" if torch.cuda.is_available() else "numpy"
+        return _PREDICTIVE_DEVICE_CACHE["auto"]
+    d = device.lower()
+    if d in ("cpu", "numpy"):
+        return "numpy"
+    if d == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("device='cuda' richiesto ma CUDA non è disponibile")
+        return "cuda"
+    raise ValueError(f"device non supportato: {device!r} (usa None, 'cuda', 'cpu')")
+
+
+@torch.no_grad()
+def _predictive_cuda(thetas: np.ndarray, Phi_aug: np.ndarray,
+                     chunk_bytes: int = 200_000_000, eps: float = 1e-12) -> dict:
+    """Integrazione MC su GPU. `thetas` (M,K,Dp) arriva gia' campionato in numpy,
+    così il percorso stocastico è identico a quello del backend numpy."""
+    M, K, Dp = thetas.shape
+    N = Phi_aug.shape[0]
+    th = torch.as_tensor(np.ascontiguousarray(thetas), dtype=torch.float32, device="cuda")
+    # blocchi su N per tenere il tensore denso (M, chunk, K) entro chunk_bytes:
+    # la VRAM è molto piu' scarsa della RAM, quindi il limite qui è piu' stretto
+    # di quello usato da predictive_batched sul percorso numpy.
+    rows = max(1, int(chunk_bytes / (M * K * 4)))
+    probs, total, ale = [], [], []
+    for s in range(0, N, rows):
+        phi = torch.as_tensor(np.ascontiguousarray(Phi_aug[s:s + rows]),
+                              dtype=torch.float32, device="cuda")
+        logits = torch.einsum("mkd,nd->mnk", th, phi)          # (M, chunk, K)
+        p_m = torch.softmax(logits, dim=-1)
+        p_mean = p_m.mean(dim=0)                                # (chunk, K)
+        h_mean = -(p_mean * (p_mean + eps).log()).sum(-1)       # (chunk,)
+        h_each = -(p_m * (p_m + eps).log()).sum(-1).mean(0)     # (chunk,)
+        probs.append(p_mean.double().cpu().numpy())
+        total.append(h_mean.double().cpu().numpy())
+        ale.append(h_each.double().cpu().numpy())
+        del logits, p_m, p_mean, h_mean, h_each, phi
+    probs = np.concatenate(probs); total = np.concatenate(total); ale = np.concatenate(ale)
+    return dict(probs=probs, total=total, aleatoric=ale, epistemic=total - ale)
 
 
 # ======================================================================
@@ -259,3 +356,46 @@ def mcmc_posterior(Phi, y, K, tau, n_samples=4000, burn_in=1000, step=0.05,
         if t >= burn_in:
             out.append(w.copy())
     return np.array(out), accepted / total
+
+
+# ======================================================================
+# Controllo eseguibile: `python -m code_v2.src.bayesian_model`
+# ======================================================================
+
+def demo():
+    """Verifica le due proprietà da cui dipende tutto il resto del progetto:
+    (1) l'identità BALD totale = aleatoria + epistemica, con epistemica >= 0;
+    (2) l'equivalenza fra backend numpy e CUDA a parità di teste campionate --
+        è ciò che autorizza a usare il percorso GPU (float32) senza rifare i
+        conti, e fallisce rumorosamente se qualcuno lo rompe."""
+    rng = np.random.default_rng(0)
+    N, Dp, K = 300, 33, 4
+    Phi = augment(rng.standard_normal((N, Dp - 1)))
+    W = rng.standard_normal((K, Dp)) * 0.5
+    lap = LastLayerLaplace.fit(W, Phi, tau_prior=1.0)
+
+    out = lap.predictive(Phi, M=400, rng=np.random.default_rng(1), device="cpu")
+    assert np.allclose(out["total"], out["aleatoric"] + out["epistemic"]), \
+        "identità BALD violata"
+    assert (out["epistemic"] > -1e-9).all(), "epistemica negativa"
+    print(f"identità BALD e non-negatività: OK  (epistemica media {out['epistemic'].mean():.6f})")
+
+    if not torch.cuda.is_available():
+        print("CUDA assente: confronto fra backend saltato")
+        return
+    ref = lap.predictive(Phi, M=400, rng=np.random.default_rng(1), device="cpu")
+    gpu = lap.predictive(Phi, M=400, rng=np.random.default_rng(1), device="cuda")
+    for key in ("total", "aleatoric", "epistemic"):
+        d = np.abs(ref[key] - gpu[key]).max()
+        # Soglia larga rispetto all'errore osservato (~1e-6) ma tre ordini di
+        # grandezza sotto l'1% relativo usato dai controlli di convergenza MC.
+        assert d < 1e-4, f"{key}: numpy e CUDA divergono di {d:.2e}"
+        print(f"numpy vs CUDA, {key:10s}: max |diff| = {d:.2e}")
+    d_p = np.abs(ref["probs"] - gpu["probs"]).max()
+    assert d_p < 1e-5, f"probs: numpy e CUDA divergono di {d_p:.2e}"
+    print(f"numpy vs CUDA, {'probs':10s}: max |diff| = {d_p:.2e}")
+    print(f"backend attivo di default: {resolve_predictive_device()}")
+
+
+if __name__ == "__main__":
+    demo()

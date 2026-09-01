@@ -25,11 +25,21 @@ here). This file therefore holds out an internal validation split from
 SVHN train and stops on validation loss, then reuses `train_map`'s own
 optimizer convention (`AdamW`, same `weight_decay`) for the actual steps.
 
-Device: uses Apple's MPS backend when available -- `SmallCNN32`, like the
-architecture used here before the move to `code_v2`, hits an unreasonably
-slow conv path in this machine's CPU-only PyTorch build (measured directly
-on the previous architecture: ~24x slower per training step than MPS).
-Falls back to CPU automatically if MPS is unavailable.
+Device: `resolve_device` picks CUDA > MPS > CPU. Both GPU backends are there
+for the same reason -- `SmallCNN32`, like the architecture used here before
+the move to `code_v2`, hits an unreasonably slow conv path in a CPU-only
+PyTorch build (measured on the previous architecture: ~24x slower per
+training step than MPS). On the machine these results were last produced on
+(GTX 1650, torch 2.5.1+cu121) CUDA is what actually gets selected, and a
+full run is ~50 seconds.
+
+Determinism: seeding alone is NOT enough on CUDA -- cuDNN autotunes its
+convolution algorithms and uses non-deterministic kernels, so two runs at
+the same seed diverge. Measured here at seed=2019: early stopping at epoch
+14 vs 13, svhn test 88.08% vs 87.71%, mnist 60.55% vs 57.13%. That ~3pp
+drift is the same order as the across-seed std the multi-seed notebook
+reports, so `train_source_model` pins `cudnn.deterministic=True` and
+`cudnn.benchmark=False`; two runs are then bit-identical (verified).
 """
 import os
 import sys
@@ -132,6 +142,16 @@ def train_source_model(seed: int = SEED, source_domain: str = SOURCE_DOMAIN, ver
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
+    # I soli seed NON bastano su CUDA: cuDNN sceglie gli algoritmi di convoluzione
+    # con un autotuner e usa kernel non deterministici, quindi due run con lo
+    # STESSO seed divergono. Misurato direttamente su questa macchina (GTX 1650,
+    # torch 2.5.1+cu121, seed=2019): early stopping all'epoca 14 vs 13,
+    # svhn test 88.08% vs 87.71%, mnist 60.55% vs 57.13% -- una deriva di ~3pp
+    # sui target, dello stesso ordine della std fra seed diversi riportata dal
+    # notebook multi-seed, che quindi senza queste due righe misura in parte
+    # rumore di esecuzione invece che varianza di inizializzazione.
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     if verbose:
         print(f"Device: {DEVICE}")
         print(f"Computing {source_domain} (source) normalization stats from its training split...")
@@ -222,6 +242,7 @@ def train_source_model(seed: int = SEED, source_domain: str = SOURCE_DOMAIN, ver
 
     return dict(
         model=model, mean=mean, std=std, weight_decay=WEIGHT_DECAY, n_source_train=n_train,
+        train_indices=np.asarray(train_ds.indices, dtype=np.int64),
         feature_dim=128, n_classes=10, seed=seed, source_domain=source_domain,
         target_domains=target_domains, source_test_acc=svhn_test_acc, target_test_acc=target_acc,
         train_time=train_time, n_epochs_run=n_epochs_run,
@@ -246,6 +267,14 @@ def main():
         "source_std": result["std"],
         "weight_decay": result["weight_decay"],
         "n_source_train": result["n_source_train"],
+        # Indici (dentro svhn_train.npz) delle immagini che l'ottimizzatore ha
+        # effettivamente visto, cioe' lo split interno di training senza la
+        # validazione dell'early stopping. Servono al fit di Laplace: theta_MAP
+        # e' il modo di (CE sommata su QUESTI punti + tau/2 ||theta||^2) con
+        # tau = weight_decay * n_source_train, quindi l'Hessiana va assemblata
+        # sugli stessi punti -- altrimenti termine di verosimiglianza e termine
+        # di prior finiscono su due N diversi.
+        "train_indices": result["train_indices"],
         "feature_dim": result["feature_dim"],
         "n_classes": result["n_classes"],
         "seed": SEED,
