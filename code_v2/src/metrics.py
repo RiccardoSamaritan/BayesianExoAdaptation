@@ -125,3 +125,44 @@ def expected_calibration_error(probs: np.ndarray, y: np.ndarray, n_bins: int = 1
     weights = bins["bin_count"] / n
     gaps = np.abs(bins["bin_acc"] - bins["bin_conf"])
     return float(np.nansum(weights * np.nan_to_num(gaps)))
+
+
+# ======================================================================
+# Aggregazione multi-seed (notebook 07, 15) -- prima ciascun notebook
+# ridefiniva la stessa tabella pre/post/delta e lo stesso report Wilcoxon.
+# ======================================================================
+
+def summarize_seed_results(results_per_seed: dict, seeds: list, arms: list, path_fn) -> dict:
+    """Aggrega, per ogni `arm`, l'accuratezza pre/post-adattamento sui vari
+    seed in media +- std, stampando la stessa tabella che ogni notebook
+    multiseed di code_v2 stampa. `path_fn(results_per_seed, seed, arm) ->
+    (acc_pre, acc_post)` lascia al chiamante il compito di navigare la
+    propria struttura di risultati per-seed (es. un `results_per_seed[seed]
+    ["adaptation"][arm]` piatto, oppure annidato di un livello in più per
+    dominio target), senza che questa funzione debba conoscerla.
+
+    Ritorna {arm: dict(pre, post, delta)}, ciascuno un array (len(seeds),)."""
+    summary = {}
+    print(f"{'braccio':>10s} {'pre':>16s} {'post':>16s} {'delta':>18s}")
+    print("-" * 64)
+    for a in arms:
+        pre = np.array([path_fn(results_per_seed, s, a)[0] for s in seeds])
+        post = np.array([path_fn(results_per_seed, s, a)[1] for s in seeds])
+        delta = post - pre
+        summary[a] = dict(pre=pre, post=post, delta=delta)
+        print(f"{a:>10s} {100*pre.mean():6.2f}%+-{100*pre.std(ddof=1):4.2f} "
+              f"{100*post.mean():6.2f}%+-{100*post.std(ddof=1):4.2f} "
+              f"{100*delta.mean():+7.2f}pp+-{100*delta.std(ddof=1):5.2f}")
+    return summary
+
+
+def wilcoxon_report(summary: dict, arm_a: str, arm_b: str) -> tuple:
+    """Test di Wilcoxon a coppie fra i delta di accuratezza per-seed di due
+    arm (`summary` da `summarize_seed_results`), stampato nello stesso
+    formato di ogni notebook multiseed di code_v2. Ritorna (stat, p)."""
+    from scipy.stats import wilcoxon
+    d_a, d_b = summary[arm_a]["delta"], summary[arm_b]["delta"]
+    stat, p = wilcoxon(d_a, d_b)
+    print(f"{arm_a} vs {arm_b}:          W={stat:.1f}  p={p:.4f}")
+    print(f"  differenze (pp), una per seed: {[round(100*x, 2) for x in (d_a - d_b)]}")
+    return stat, p

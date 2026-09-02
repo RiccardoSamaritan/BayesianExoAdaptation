@@ -61,7 +61,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from code_v2.src.digits_data import compute_source_stats, load_domain
-from code_v2.src.digits_model import SmallCNN32
+from code_v2.src.digits_model import SmallCNN32, evaluate
 
 SOURCE_DOMAIN = "svhn"
 TARGET_DOMAINS = ["mnist", "usps"]
@@ -110,19 +110,6 @@ for arg in sys.argv[1:]:
         break
 else:
     DEVICE = resolve_device()
-
-
-def evaluate(model: nn.Module, loader: DataLoader) -> tuple:
-    model.eval()
-    criterion = nn.CrossEntropyLoss()
-    correct, total, loss_sum = 0, 0, 0.0
-    with torch.no_grad():
-        for X_b, y_b in loader:
-            logits = model(X_b)
-            loss_sum += criterion(logits, y_b).item() * X_b.shape[0]
-            correct += (logits.argmax(dim=1) == y_b).sum().item()
-            total += X_b.shape[0]
-    return correct / total, loss_sum / total
 
 
 def train_source_model(seed: int = SEED, source_domain: str = SOURCE_DOMAIN, verbose: bool = True) -> dict:

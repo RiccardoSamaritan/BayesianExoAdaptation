@@ -241,6 +241,124 @@ def _entropy(p: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 # ======================================================================
+# Helper condivisi dai notebook digits (08-15): sweep di convergenza MC,
+# scelta di M_FIXED, predittiva per-dominio -- prima di questa funzione
+# ciascuno dei tre reimplementava la stessa logica per conto proprio.
+# ======================================================================
+
+_STAT_SHORT = {"epistemic": "epi", "aleatoric": "ale", "total": "total"}
+
+
+def mc_convergence_sweep(laplace: "LastLayerLaplace", Phi_aug_eval: dict, M_values,
+                         eval_domains: list = None, rng_seed: int = 123, batched: bool = True,
+                         stats=("total", "aleatoric", "epistemic")) -> dict:
+    """Esegue la predittiva MC di `laplace` a ogni M in `M_values`, su ogni
+    dominio di `Phi_aug_eval`, tracciando la media delle statistiche richieste
+    in funzione di M -- il materiale grezzo di un controllo/plot di
+    convergenza MC (vedi `select_M_fixed`).
+
+    Stesso seed a ogni M e ogni dominio (`rng_seed`): i valori di M successivi
+    sono quindi estrazioni innestate dallo stesso stream, non esperimenti
+    indipendenti -- è questo che rende le curve risultanti convergenti invece
+    che rumorose per il solo campionamento.
+
+    Ritorna un dict con una chiave `f"{dominio}_{sigla}"` -> list[float]
+    (allineata a `M_values`) per ogni coppia (dominio, statistica) richiesta
+    (sigle: epistemic->epi, aleatoric->ale, total->total), più `"M"` ->
+    list[int]."""
+    if eval_domains is None:
+        eval_domains = list(Phi_aug_eval.keys())
+    predict = laplace.predictive_batched if batched else laplace.predictive
+    convergence = {f"{d}_{_STAT_SHORT[s]}": [] for d in eval_domains for s in stats}
+    convergence["M"] = []
+    for M in M_values:
+        convergence["M"].append(M)
+        for domain in eval_domains:
+            rng = np.random.default_rng(rng_seed)
+            pred = predict(Phi_aug_eval[domain], M=M, rng=rng)
+            for s in stats:
+                convergence[f"{domain}_{_STAT_SHORT[s]}"].append(pred[s].mean())
+    return convergence
+
+
+def select_M_fixed(convergence: dict, ref_epi: dict, eval_domains: list,
+                   relative_threshold: float = 0.01, absolute_threshold_frac: float = 0.02,
+                   stability_window: int = 3, M_reference: int = 5000) -> int:
+    """Sceglie il più piccolo M in `convergence["M"]` da cui la media
+    epistemica resta entro una tolleranza sia relativa (`relative_threshold`)
+    sia assoluta (`absolute_threshold_frac` * massimo osservato) dal valore di
+    riferimento in `ref_epi`, per `stability_window` valori di M consecutivi,
+    su tutti i domini di `eval_domains` simultaneamente. Ricade su
+    `M_reference` se nessun M soddisfa la condizione."""
+    epi_max = max(list(ref_epi.values()) +
+                 sum([convergence[f"{d}_epi"] for d in eval_domains], []))
+    absolute_threshold = absolute_threshold_frac * epi_max
+
+    def check_point(i):
+        return all(abs(convergence[f"{d}_epi"][i] - ref_epi[d]) / ref_epi[d] < relative_threshold
+                   and abs(convergence[f"{d}_epi"][i] - ref_epi[d]) < absolute_threshold
+                   for d in eval_domains)
+
+    point_ok = [check_point(i) for i in range(len(convergence["M"]))]
+    for i, M in enumerate(convergence["M"]):
+        if i + stability_window <= len(convergence["M"]) and all(point_ok[i:i + stability_window]):
+            return M
+    return M_reference
+
+
+def fit_laplace_and_check_convergence(model, Phi_aug_train: np.ndarray, tau_prior: float,
+                                      Phi_aug_eval: dict, eval_domains: list = None,
+                                      M_values=(50, 100, 250, 500, 1000, 2000, 3000, 4000),
+                                      M_reference: int = 5000, relative_threshold: float = 0.01,
+                                      absolute_threshold_frac: float = 0.02, stability_window: int = 3,
+                                      rng_seed: int = 123, batched: bool = False) -> tuple:
+    """Fitta un `LastLayerLaplace` su (`Phi_aug_train`, `tau_prior`), poi
+    sceglie il numero minimo di campioni MC `M_fixed` (vedi `select_M_fixed`)
+    la cui media epistemica è indistinguibile da una stima a `M_reference`
+    campioni, su ogni dominio di `Phi_aug_eval`/`eval_domains`. Wrappa
+    `mc_convergence_sweep` + `select_M_fixed` per il caso comune in cui serve
+    solo la curva epistemica (non l'intero sweep totale/aleatoria/epistemica)
+    -- vedi il Notebook 10 per la versione più ricca, non wrappata, che
+    disegna anche la convergenza di totale/aleatoria.
+
+    `batched`: passare True per usare `laplace.predictive_batched` invece di
+    `laplace.predictive` (serve quando N è grande abbastanza che un tensore
+    denso (M,N,K) rischi l'OOM -- vedi `LastLayerLaplace.predictive_batched`).
+
+    Ritorna (laplace, M_fixed)."""
+    if eval_domains is None:
+        eval_domains = list(Phi_aug_eval.keys())
+    W_aug = head_weights(model)
+    laplace = LastLayerLaplace.fit(W_aug, Phi_aug_train, tau_prior=tau_prior)
+
+    convergence = mc_convergence_sweep(laplace, Phi_aug_eval, M_values, eval_domains,
+                                       rng_seed=rng_seed, batched=batched, stats=("epistemic",))
+    ref_conv = mc_convergence_sweep(laplace, Phi_aug_eval, [M_reference], eval_domains,
+                                    rng_seed=rng_seed, batched=batched, stats=("epistemic",))
+    ref_epi = {d: ref_conv[f"{d}_epi"][0] for d in eval_domains}
+
+    M_fixed = select_M_fixed(convergence, ref_epi, eval_domains, relative_threshold,
+                             absolute_threshold_frac, stability_window, M_reference)
+    return laplace, M_fixed
+
+
+def predict_domain(model, laplace: "LastLayerLaplace", X, y, device: str = "cpu",
+                   M: int = 200, seed: int = 456) -> tuple:
+    """Estrae le feature di (X, y) tramite `model`, poi esegue la predittiva
+    MC (batched) di `laplace` a quell'M, con un seed indipendente dallo stato
+    RNG del chiamante (`seed`, default coerente con il seed fisso usato da
+    ogni notebook digits di code_v2 per il report finale -- a differenza del
+    seed dello sweep di convergenza). Ritorna (pred, y_np): `pred` è il dict
+    di `laplace.predictive_batched` (probs/total/aleatoric/epistemic)."""
+    loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(X, y), batch_size=256)
+    Phi, y_np, _ = extract(model, loader, device=device)
+    Phi_aug = augment(Phi)
+    rng = np.random.default_rng(seed)
+    pred = laplace.predictive_batched(Phi_aug, M=M, rng=rng)
+    return pred, y_np
+
+
+# ======================================================================
 # Backend CUDA per la predittiva MC
 # ======================================================================
 #

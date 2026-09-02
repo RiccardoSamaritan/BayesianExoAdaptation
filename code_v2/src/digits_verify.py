@@ -27,7 +27,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from code_v2.src.digits_data import load_domain
-from code_v2.src.digits_model import SmallCNN32
+from code_v2.src.digits_model import SmallCNN32, evaluate
 
 CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "models" / "source_svhn" / "model.pt"
 TARGET_DOMAINS = ["mnist", "usps"]
@@ -37,17 +37,6 @@ BATCH_SIZE = 128
 # float precision would instead risk failing spuriously across CPU/MPS
 # backend differences (see digits_train.py's module docstring).
 PASS_TOLERANCE = 0.005  # 0.5 percentage points
-
-
-def evaluate(model: torch.nn.Module, loader: DataLoader) -> float:
-    model.eval()
-    correct, total = 0, 0
-    with torch.no_grad():
-        for X_b, y_b in loader:
-            preds = model(X_b).argmax(dim=1)
-            correct += (preds == y_b).sum().item()
-            total += y_b.shape[0]
-    return correct / total
 
 
 def main():
@@ -78,7 +67,7 @@ def main():
     print(f"\n[1/2] Recomputing {domain} test accuracy (mean={mean:.4f} std={std:.4f})...")
     X_test, y_test = load_domain(domain, "test", mean, std)
     test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False)
-    recomputed_svhn_acc = evaluate(model, test_loader)
+    recomputed_svhn_acc, _ = evaluate(model, test_loader)
 
     reference_svhn_acc = ckpt["svhn_test_acc"]
     diff = abs(recomputed_svhn_acc - reference_svhn_acc)
@@ -98,7 +87,7 @@ def main():
     for t_domain in TARGET_DOMAINS:
         X_t, y_t = load_domain(t_domain, "test", mean, std)
         loader = DataLoader(TensorDataset(X_t, y_t), batch_size=BATCH_SIZE, shuffle=False)
-        recomputed = evaluate(model, loader)
+        recomputed, _ = evaluate(model, loader)
         reference = ckpt["target_test_acc"][t_domain]
         t_diff = abs(recomputed - reference)
         t_pass = t_diff < PASS_TOLERANCE
